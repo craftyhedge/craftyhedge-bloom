@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A single page website built with Tailwind CSS, Three.js, vanilla JavaScript, and GSAP."
+    />
+    <title>Craftyhedge</title>
+  </head>
+  <body class="bg-zinc-950 text-zinc-50 antialiased">
+    <canvas id="scene" class="fixed inset-0 -z-10 h-full w-full"></canvas>
+
+    <main class="min-h-screen overflow-hidden">
+      <section class="relative grid min-h-screen place-items-center px-6 py-20">
+        <div class="mx-auto max-w-5xl text-center">
+          <p class="eyebrow mb-5 text-sm font-semibold uppercase tracking-[0.28em] text-teal-300">
+            Tailwind · Three.js · GSAP
+          </p>
+          <h1 class="headline text-balance text-5xl font-black leading-[0.95] text-white sm:text-7xl lg:text-8xl">
+            Craftyhedge
+          </h1>
+          <p class="intro mx-auto mt-7 max-w-2xl text-pretty text-lg leading-8 text-zinc-300 sm:text-xl">
+            A lightweight single page canvas for polished motion, responsive layout, and immersive WebGL details.
+          </p>
+          <div class="actions mt-10 flex flex-wrap items-center justify-center gap-3">
+            <a
+              href="#work"
+              class="rounded-full bg-teal-300 px-6 py-3 text-sm font-bold text-zinc-950 transition hover:bg-teal-200 focus:outline-none focus:ring-2 focus:ring-teal-200 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              Explore
+            </a>
+            <a
+              href="#contact"
+              class="rounded-full border border-white/20 px-6 py-3 text-sm font-bold text-white transition hover:border-white/40 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/40 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              Contact
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section id="work" class="relative bg-zinc-950/80 px-6 py-24 backdrop-blur-sm">
+        <div class="mx-auto grid max-w-6xl gap-8 md:grid-cols-3">
+          <article class="feature rounded-lg border border-white/10 bg-white/[0.04] p-6">
+            <h2 class="text-xl font-bold text-white">Responsive</h2>
+            <p class="mt-3 leading-7 text-zinc-300">
+              Layout primitives are wired for small screens first, then scale cleanly into desktop compositions.
+            </p>
+          </article>
+          <article class="feature rounded-lg border border-white/10 bg-white/[0.04] p-6">
+            <h2 class="text-xl font-bold text-white">Animated</h2>
+            <p class="mt-3 leading-7 text-zinc-300">
+              GSAP handles the entrance choreography while keeping the JavaScript easy to extend.
+            </p>
+          </article>
+          <article class="feature rounded-lg border border-white/10 bg-white/[0.04] p-6">
+            <h2 class="text-xl font-bold text-white">Dimensional</h2>
+            <p class="mt-3 leading-7 text-zinc-300">
+              Three.js powers a full-bleed WebGL background that reacts to pointer movement.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="contact" class="relative bg-zinc-100 px-6 py-24 text-zinc-950">
+        <div class="mx-auto max-w-4xl">
+          <h2 class="text-4xl font-black tracking-tight sm:text-5xl">Ready to shape the page.</h2>
+          <p class="mt-5 max-w-2xl text-lg leading-8 text-zinc-700">
+            This scaffold gives us a clean base for brand, content, WebGL art direction, and scroll-based interactions.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
