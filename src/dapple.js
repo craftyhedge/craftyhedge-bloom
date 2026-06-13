@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Fn, bitXor, clamp, float, floor, fract, int, mix, positionWorld, shiftRight, sin, smoothstep, time, uint, uniform, vec2, vec3 } from 'three/tsl';
+import { Fn, abs, bitXor, clamp, float, floor, fract, int, mix, positionWorld, shiftRight, sin, smoothstep, time, uint, uniform, vec2, vec3 } from 'three/tsl';
 
 // Procedural "dappled light through a tree" gobo.
 //
@@ -127,28 +127,46 @@ export function createDappleNode({
     ).mul(sway);
     const anchored = projected.add(swayOffset);
 
-    // Two octaves: broad gaps + smaller leaf clusters. The fine octave is ROTATED
-    // (~31.7deg via the 0.85/0.53 basis) so its noise grid doesn't run parallel to
-    // the broad octave's. Aligned grids reinforce each other's axis-aligned cell
-    // structure; rotating one breaks up any residual grid look so neither set of
-    // cell lines reads as straight tonal blocks across a flat letter face.
-    const broad = valueNoise(anchored);
+    // Rotate once so leaf and branch structures do not inherit the noise grid.
     const rotated = vec2(
       anchored.x.mul(0.85).sub(anchored.y.mul(0.53)),
       anchored.x.mul(0.53).add(anchored.y.mul(0.85)),
     );
+    const broad = valueNoise(anchored.mul(0.72));
+    const middle = valueNoise(rotated.mul(1.45).add(vec2(4.6, -2.8)));
     const fine = valueNoise(rotated.mul(2.3).add(vec2(
       sin(t.mul(swaySpd).mul(1.3)).mul(0.18),
       sin(t.mul(swaySpd).mul(1.1).add(1.7)).mul(0.18),
     )));
 
-    const canopy = broad.mul(0.65).add(fine.mul(0.35));
+    // Branches are smooth distance fields around finite, gently curved paths.
+    // Noise only bends the centreline; it never defines the edge, so stretching
+    // cannot expose square interpolation cells as blocky shadow shapes.
+    const branchWarp = valueNoise(rotated.mul(0.38).add(vec2(7.3, -4.1))).sub(0.5);
+    const trunkAxis = rotated.y.mul(0.42)
+      .sub(sin(rotated.x.mul(0.48).add(branchWarp.mul(1.8))).mul(0.34))
+      .add(0.12);
+    const trunkGate = smoothstep(-3.8, -2.4, rotated.x)
+      .mul(float(1).sub(smoothstep(2.2, 3.6, rotated.x)));
+    const trunk = float(1).sub(smoothstep(0.045, 0.18, abs(trunkAxis))).mul(trunkGate);
+
+    const forkAxis = rotated.y.mul(0.58)
+      .sub(rotated.x.mul(0.22))
+      .sub(sin(rotated.x.mul(0.62).add(1.7)).mul(0.2))
+      .sub(0.42);
+    const forkGate = smoothstep(-1.8, -0.6, rotated.x)
+      .mul(float(1).sub(smoothstep(2.4, 3.25, rotated.x)));
+    const fork = float(1).sub(smoothstep(0.035, 0.13, abs(forkAxis))).mul(forkGate);
+    const branchShadow = clamp(trunk.mul(0.7).add(fork.mul(0.48)), 0, 1);
+
+    const leafLight = broad.mul(0.34).add(middle.mul(0.34)).add(fine.mul(0.32));
+    const canopy = leafLight.mul(float(1).sub(branchShadow.mul(0.68)));
 
     // Soft light pools with a wide penumbra: a generous smoothstep band so pool
     // edges feather gently instead of snapping to a hard line. coverage shifts
     // the midpoint (lower = more shadow, higher = more open sun).
-    const lo = cover.sub(0.34);
-    const hi = cover.add(0.34);
+    const lo = cover.sub(0.32);
+    const hi = cover.add(0.32);
     const rawLight = smoothstep(lo, hi, canopy); // 0 = shadow, 1 = open sun
 
     // Fade the shadow out with height. A cast shadow's penumbra widens (softens)
