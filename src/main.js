@@ -6,6 +6,7 @@ import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { abs, color, mix, normalWorld, oneMinus, positionWorld, smoothstep } from 'three/tsl';
 import { createDappleNode } from './dapple.js';
+import { createFlowerPatch } from './flowers.js';
 
 const canvas = document.querySelector('#scene');
 const sceneStage = document.querySelector('[data-scene-stage]');
@@ -186,6 +187,8 @@ const tuftDappleConfig = { ...dappleConfig, clampMax: 1 };
 
 // Set once the near-letter fill blanket is built inside the async font load.
 let fillTuftCount = 0;
+// Set once the glyph masks exist; lets the flower spawner skip the rock letters.
+let isUnderRockTest = null;
 
 const mossTop = createTuftBlanket({
   width: HEDGE_WIDTH,
@@ -215,6 +218,13 @@ const mossTop = createTuftBlanket({
 });
 
 scene.add(hedgeBase, mossTop.mesh);
+
+const flowerPatch = createFlowerPatch({
+  maxFlowers: 1200,
+  yOffset: GROUND_Y,
+  canGrow: (x, z) => isInVisibleHedge(x, z) && !(isUnderRockTest && isUnderRockTest(x, z)),
+});
+scene.add(flowerPatch.object);
 
 const sun = new THREE.DirectionalLight(0xfff2c4, 5.2);
 sun.position.copy(SUN_POSITION);
@@ -499,6 +509,7 @@ fontLoader.load(
       return nearest < TUFT_CULL_MARGIN;
     };
 
+    isUnderRockTest = isUnderRock;
     mossTop.removeWhere(isUnderRock);
 
     // Fine fill tufts that hug the letters: half-size, denser-spaced moss that
@@ -572,8 +583,30 @@ function updateCamera() {
   camera.updateMatrixWorld();
 }
 
+// Hover-to-bloom: project the pointer onto the ground plane and spawn flowers
+// where it passes over visible moss (but never on the bare rock letters).
+const clock = new THREE.Clock();
+
+function spawnFlowerAtPointer(event) {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+
+  const ground = getGroundCorner(ndcX, ndcY);
+  const { x, z } = ground;
+
+  if (!isInVisibleHedge(x, z)) return;
+  if (isUnderRockTest && isUnderRockTest(x, z)) return;
+
+  flowerPatch.scatter(x, z);
+}
+
+canvas.addEventListener('pointermove', spawnFlowerAtPointer);
+
 function animate() {
   updateCamera();
+  flowerPatch.update(clock.getDelta());
   renderer.render(scene, camera);
 }
 
