@@ -26,7 +26,7 @@
 
   @media (max-width: 640px) {
     .scene-stage {
-      height: min(100svh, 170vw, 640px);
+      height: min(100svh, 170vw, 1000px);
     }
   }
 }

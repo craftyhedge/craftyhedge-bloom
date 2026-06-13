@@ -12,31 +12,31 @@ const HEAD_Y = 0.62; // local height of the bloom face above the flower root
 const SPECIES = [
   {
     stage: 0,
-    name: 'indigo', palette: ['#718cff', '#536dff', '#9aabff'],
+    name: 'indigo', palette: ['#416dff', '#294fe8', '#6790ff'],
     size: [0.6, 0.95], stem: [0.42, 0.58], tilt: 0.5, bloom: [1.4, 2.4],
     form: { petals: 5, rings: 1, tip: 0.52, wide: 0.34, lift: 0.16, cup: 0.5, shape: 'round', disc: 0.16, discColor: 0xffdf62, discLift: 0.02 },
   },
   {
     stage: 0,
-    name: 'aqua', palette: ['#39f1df', '#20d9d0', '#85fff0'],
+    name: 'aqua', palette: ['#18e5d0', '#00bfb7', '#43f2df'],
     size: [0.45, 0.7], stem: [0.4, 0.54], tilt: 0.35, bloom: [2.2, 3.4],
     form: { petals: 14, rings: 1, tip: 0.5, wide: 0.07, lift: 0.05, cup: 0.15, shape: 'spoon', disc: 0.2, discColor: 0xd6a32e, discLift: 0.05 },
   },
   {
     stage: 0,
-    name: 'blue', palette: ['#6ca8ff', '#478cff', '#9bc5ff'],
+    name: 'blue', palette: ['#3e91ff', '#176de8', '#68adff'],
     size: [0.4, 0.62], stem: [0.46, 0.62], tilt: 0.6, bloom: [2.0, 3.0],
     form: { petals: 8, rings: 2, tip: 0.5, wide: 0.13, lift: 0.22, cup: 0.6, shape: 'notch', disc: 0.1, discColor: 0xdff7ff, discLift: 0.06 },
   },
   {
     stage: 0,
-    name: 'periwinkle', palette: ['#91a7ff', '#748de8', '#b8c5ff'],
+    name: 'emerald', palette: ['#35df91', '#17b86e', '#62efa9'],
     size: [0.4, 0.6], stem: [0.4, 0.52], tilt: 0.4, bloom: [2.6, 3.8],
     form: { petals: 5, rings: 1, tip: 0.46, wide: 0.3, lift: 0.13, cup: 0.7, shape: 'round', disc: 0.12, discColor: 0xffe56b, discLift: 0.03 },
   },
   {
     stage: 1,
-    name: 'blue-violet', palette: ['#8f91ff', '#716de8', '#b2b4ff'],
+    name: 'cobalt', palette: ['#526fff', '#354de0', '#748bff'],
     size: [0.35, 0.55], stem: [0.38, 0.5], tilt: 0.7, bloom: [2.4, 3.4],
     form: { petals: 5, rings: 1, tip: 0.44, wide: 0.26, lift: 0.1, cup: 0.3, shape: 'point', disc: 0.08, discColor: 0xd6a32e, discLift: 0.02 },
   },
@@ -48,38 +48,38 @@ const SPECIES = [
   },
   {
     stage: 1,
-    name: 'cool-lavender', palette: ['#aaa5ff', '#8e86e8', '#cbc7ff'],
+    name: 'clear-cyan', palette: ['#27dfff', '#00addf', '#64ebff'],
     size: [0.48, 0.72], stem: [0.5, 0.68], tilt: 0.48, bloom: [2.0, 3.0],
     form: { petals: 7, rings: 1, tip: 0.58, wide: 0.16, lift: 0.2, cup: 0.45, shape: 'point', disc: 0.12, discColor: 0xffed87, discLift: 0.05 },
   },
   {
     stage: 1,
-    name: 'peach-cream', palette: ['#ffe7c7', '#ffd4ab', '#fff3da'],
+    name: 'tangerine', palette: ['#ff9f2f', '#ef741c', '#ffbd4d'],
     size: [0.52, 0.78], stem: [0.45, 0.62], tilt: 0.4, bloom: [1.8, 2.8],
     form: { petals: 6, rings: 1, tip: 0.5, wide: 0.24, lift: 0.18, cup: 0.8, shape: 'round', disc: 0.13, discColor: 0xffdc50, discLift: 0.05 },
   },
   {
     stage: 2,
-    name: 'rose-crown', palette: ['#ff7898', '#ef527b', '#ffa9bc'],
+    name: 'crimson-crown', palette: ['#ed3552', '#c91f3d', '#ff5e6e'],
     size: [0.72, 1.0], stem: [0.62, 0.82], tilt: 0.38, bloom: [1.4, 2.2],
     form: { petals: 9, rings: 2, tip: 0.62, wide: 0.13, lift: 0.25, cup: 0.65, shape: 'notch', disc: 0.14, discColor: 0xffe278, discLift: 0.08 },
   },
   {
     stage: 2,
-    name: 'electric-orchid', palette: ['#9c69ff', '#7d4ce8', '#bd94ff'],
+    name: 'electric-blue', palette: ['#176cff', '#0047d6', '#269fff'],
     size: [0.65, 0.9], stem: [0.58, 0.78], tilt: 0.5, bloom: [1.5, 2.3],
     form: { petals: 5, rings: 2, tip: 0.6, wide: 0.22, lift: 0.28, cup: 0.72, shape: 'spoon', disc: 0.1, discColor: 0xe9fbff, discLift: 0.08 },
   },
   {
     stage: 2,
-    name: 'coral-crown', palette: ['#ff765f', '#f05245', '#ffa28d'],
+    name: 'orange-crown', palette: ['#ff7424', '#e84a15', '#ff9b38'],
     size: [0.7, 0.96], stem: [0.56, 0.76], tilt: 0.42, bloom: [1.5, 2.4],
     form: { petals: 11, rings: 1, tip: 0.58, wide: 0.12, lift: 0.22, cup: 0.5, shape: 'point', disc: 0.18, discColor: 0xfff0a8, discLift: 0.07 },
   },
   {
     boundary: true,
     stage: 0,
-    name: 'edge-bell', palette: ['#f7fbff', '#cfeeff', '#d9ddff'],
+    name: 'edge-bell', palette: ['#e8ffff', '#a8efff', '#c8f8ef'],
     size: [0.3, 0.46], stem: [0.3, 0.44], tilt: 0.32, bloom: [2.5, 3.6],
     form: { petals: 6, rings: 1, tip: 0.38, wide: 0.16, lift: 0.18, cup: 0.9, shape: 'round', disc: 0.08, discColor: 0xffe66d, discLift: 0.04 },
   },
@@ -93,7 +93,7 @@ const SPECIES = [
   {
     boundary: true,
     stage: 2,
-    name: 'edge-trumpet', palette: ['#ff9cae', '#ff7896', '#ffc0c9'],
+    name: 'edge-trumpet', palette: ['#ff5e55', '#df3340', '#ff805f'],
     size: [0.42, 0.62], stem: [0.38, 0.56], tilt: 0.42, bloom: [1.8, 2.8],
     form: { petals: 5, rings: 1, tip: 0.48, wide: 0.2, lift: 0.24, cup: 1.0, shape: 'spoon', disc: 0.08, discColor: 0xffef9c, discLift: 0.06 },
   },
@@ -117,9 +117,9 @@ const BOUNDARY_SPECIES_BY_STAGE = [0, 1, 2].map((stage) => (
 // shape: later stages rise above the earlier carpet and step toward lighter,
 // more luminous colours.
 const STAGE_STYLE = [
-  { scale: 0.86, stem: 0.92, saturation: 0.08, lightness: 0.01 },
-  { scale: 1.06, stem: 1.08, saturation: 0.03, lightness: 0.06 },
-  { scale: 1.28, stem: 1.22, saturation: 0.1, lightness: 0.06 },
+  { scale: 0.86, stem: 0.92, saturation: 0.06, lightness: 0 },
+  { scale: 1.06, stem: 1.08, saturation: 0.05, lightness: 0.015 },
+  { scale: 1.28, stem: 1.22, saturation: 0.08, lightness: 0.02 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -308,10 +308,10 @@ export function createFlowerPatch({
       // Fold the dapple into the base colour so blooms dim/warm with the same
       // light pools as the moss instead of reading as flatly-lit decals on top.
       const shadedTint = dappleNode ? mul(tinted, dappleNode) : tinted;
-      material.colorNode = isPetal ? mul(shadedTint, 1.08) : shadedTint;
+      material.colorNode = isPetal ? mul(shadedTint, 1.03) : shadedTint;
       // Keep colour in the dapple shade without flattening it. Petals get a
       // slightly higher floor; the scene's bloom pass still supplies any halo.
-      material.emissiveNode = mul(tinted, isPetal ? 0.26 : 0.18);
+      material.emissiveNode = mul(tinted, isPetal ? 0.2 : 0.14);
       const mesh = new THREE.InstancedMesh(geo, material, count);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       for (let i = 0; i < count; i += 1) mesh.setMatrixAt(i, zeroMat);
@@ -442,7 +442,7 @@ export function createFlowerPatch({
 
   // --- placement ------------------------------------------------------------
 
-  function makeFlower(x, z, speciesIndex) {
+  function makeFlower(x, z, speciesIndex, growthScale = 1) {
     const species = SPECIES[speciesIndex];
     const stageStyle = STAGE_STYLE[species.stage];
     const localTiltScale = tiltScale ? tiltScale(x, z) : 1;
@@ -450,7 +450,7 @@ export function createFlowerPatch({
     tmpColor.offsetHSL(0, stageStyle.saturation, stageStyle.lightness);
     const scale = (
       species.size[0] + rand() * (species.size[1] - species.size[0])
-    ) * stageStyle.scale;
+    ) * stageStyle.scale * growthScale;
     return {
       x, z,
       y: (
@@ -473,7 +473,7 @@ export function createFlowerPatch({
     };
   }
 
-  function place(x, z, speciesIndex, pack = 0.62) {
+  function place(x, z, speciesIndex, pack = 0.62, growthScale = 1) {
     if (canGrow && !canGrow(x, z)) return false;
     const form = forms[speciesIndex];
     const np = form.species.form.petals;
@@ -483,7 +483,7 @@ export function createFlowerPatch({
     if (form.bases.length >= perBase) return false;
     if (form.petals.length + totalPetals > form.petalCap) return false;
 
-    const flower = makeFlower(x, z, speciesIndex);
+    const flower = makeFlower(x, z, speciesIndex, growthScale);
     for (let i = 0; i < flowers.length; i += 1) {
       const o = flowers[i];
       const dx = o.x - x, dz = o.z - z;
@@ -564,36 +564,66 @@ export function createFlowerPatch({
   }
 
   // --- colony state ---------------------------------------------------------
-  let colonySpecies = SPECIES_BY_STAGE[0][Math.floor(rand() * SPECIES_BY_STAGE[0].length)];
-  let colonyStage = 0;
-  let colonyX = 0, colonyZ = 0;
-  let boundarySpecies = BOUNDARY_SPECIES_BY_STAGE[0][0];
-  let boundaryStage = 0;
-  let boundaryX = 0, boundaryZ = 0;
+  const fieldColony = {
+    species: SPECIES_BY_STAGE[0][Math.floor(rand() * SPECIES_BY_STAGE[0].length)],
+    stage: 0,
+    x: 0,
+    z: 0,
+    radius: 1.6,
+    vigor: 1,
+    initialized: false,
+  };
+  const boundaryColony = {
+    species: BOUNDARY_SPECIES_BY_STAGE[0][0],
+    stage: 0,
+    x: 0,
+    z: 0,
+    radius: 1.1,
+    vigor: 1,
+    initialized: false,
+  };
   let windClock = 0;
 
   function scatterFromSet(x, z, growthStage, speciesByStage, colony, spread, maxTries) {
     const stage = THREE.MathUtils.clamp(Math.floor(growthStage), 0, speciesByStage.length - 1);
     const speciesSet = speciesByStage[stage];
     const dcx = x - colony.x, dcz = z - colony.z;
-    if (stage !== colony.stage || dcx * dcx + dcz * dcz > 1.6 * 1.6 || rand() < 0.04) {
+    if (!colony.initialized || stage !== colony.stage
+      || dcx * dcx + dcz * dcz > colony.radius * colony.radius || rand() < 0.025) {
       colony.species = speciesSet[Math.floor(rand() * speciesSet.length)];
       colony.stage = stage;
       colony.x = x; colony.z = z;
+      colony.radius = maxTries === 1 ? 0.8 + rand() * 0.65 : 1.25 + rand() * 1.1;
+      colony.vigor = 0.9 + rand() * 0.22;
+      colony.initialized = true;
     }
 
-    const tries = maxTries === 1 ? 1 : rand() < 0.55 ? 1 : rand() < 0.85 ? 2 : maxTries;
+    const distanceFromCenter = Math.sqrt(
+      (x - colony.x) * (x - colony.x) + (z - colony.z) * (z - colony.z),
+    );
+    const centerStrength = 1 - THREE.MathUtils.smoothstep(
+      distanceFromCenter,
+      colony.radius * 0.15,
+      colony.radius,
+    );
+    const tries = maxTries === 1
+      ? 1
+      : centerStrength > 0.62 ? (rand() < 0.35 ? 2 : maxTries)
+        : centerStrength > 0.25 ? (rand() < 0.55 ? 1 : 2)
+          : 1;
     const planted = [];
     for (let t = 0; t < tries; t += 1) {
       const r = (rand() * rand()) * spread;
       const a = rand() * Math.PI * 2;
       const fx = x + Math.cos(a) * r;
       const fz = z + Math.sin(a) * r;
-      const species = rand() < 0.15
+      const species = rand() < 0.08
         ? speciesSet[Math.floor(rand() * speciesSet.length)]
         : colony.species;
-      const pack = 0.55 + rand() * 0.2;
-      if (place(fx, fz, species, pack)) planted.push({ x: fx, z: fz });
+      const edgeScale = THREE.MathUtils.lerp(0.74, 1.12, centerStrength);
+      const growthScale = colony.vigor * edgeScale * (0.92 + rand() * 0.16);
+      const pack = THREE.MathUtils.lerp(0.74, 0.5, centerStrength) + rand() * 0.08;
+      if (place(fx, fz, species, pack, growthScale)) planted.push({ x: fx, z: fz });
     }
     return planted;
   }
@@ -602,19 +632,13 @@ export function createFlowerPatch({
     object: group,
     flowers,
     scatter(x, z, growthStage = 0) {
-      const colony = { species: colonySpecies, stage: colonyStage, x: colonyX, z: colonyZ };
-      const planted = scatterFromSet(x, z, growthStage, SPECIES_BY_STAGE, colony, 0.85, 3);
-      colonySpecies = colony.species; colonyStage = colony.stage;
-      colonyX = colony.x; colonyZ = colony.z;
-      return planted;
+      return scatterFromSet(x, z, growthStage, SPECIES_BY_STAGE, fieldColony, 0.85, 3);
     },
 
     scatterBoundary(x, z, growthStage = 0) {
-      const colony = { species: boundarySpecies, stage: boundaryStage, x: boundaryX, z: boundaryZ };
-      const planted = scatterFromSet(x, z, growthStage, BOUNDARY_SPECIES_BY_STAGE, colony, 0.18, 1);
-      boundarySpecies = colony.species; boundaryStage = colony.stage;
-      boundaryX = colony.x; boundaryZ = colony.z;
-      return planted;
+      return scatterFromSet(
+        x, z, growthStage, BOUNDARY_SPECIES_BY_STAGE, boundaryColony, 0.18, 1,
+      );
     },
 
     update(delta) {
