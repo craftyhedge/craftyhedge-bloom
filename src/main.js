@@ -70,6 +70,11 @@ function fitCameraToText(aspect) {
   camera.aspect = aspect;
   camera.fov = DESIGN_VERTICAL_FOV;
   camera.updateProjectionMatrix();
+  // Ultrawide projections naturally make the text occupy less horizontal NDC,
+  // which used to let the fit solver move the camera closer. Fit against at
+  // most the 16:9 design aspect, while keeping the real projection aspect, so
+  // wider screens reveal more hedge instead of enlarging the scene subjects.
+  const fitAspect = Math.min(aspect, DESIGN_ASPECT);
 
   let nearScale = 0.5;
   let farScale = 4;
@@ -78,7 +83,8 @@ function fitCameraToText(aspect) {
     const scale = (nearScale + farScale) / 2;
     setCameraScale(scale);
     const projectedCorners = textFrameCorners.map((point) => point.clone().project(camera));
-    const maxScreenX = Math.max(...projectedCorners.map((point) => Math.abs(point.x)));
+    const maxScreenX = Math.max(...projectedCorners.map((point) => Math.abs(point.x)))
+      * (aspect / fitAspect);
     const halfScreenHeight = (
       Math.max(...projectedCorners.map((point) => point.y))
       - Math.min(...projectedCorners.map((point) => point.y))
