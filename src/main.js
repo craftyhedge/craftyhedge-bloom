@@ -194,6 +194,11 @@ const dappleConfig = {
 // colours past white. The uncapped boost is what blew out isolated swaying tips
 // into the flickering white sparkle. Ground/rock keep the full boost.
 const tuftDappleConfig = { ...dappleConfig, clampMax: 1 };
+const hedgeWind = {
+  windDirection: new THREE.Vector2(0.58, 0.82).normalize(),
+  windScale: 3.2,
+  windSpeed: 1.0,
+};
 
 // Set once the near-letter fill blanket is built inside the async font load.
 let fillTuftCount = 0;
@@ -216,8 +221,7 @@ const mossTop = createTuftBlanket({
   widthRange: [0.64, 1.08],
   windRange: [0.12, 0.26],
   animated: true,
-  windScale: 3.2,
-  windSpeed: 1.0,
+  ...hedgeWind,
   yOffset: GROUND_Y,
   hueRange: [0.22, 0.33],
   saturationRange: [0.62, 0.86],
@@ -247,6 +251,7 @@ const flowerPatch = createFlowerPatch({
   // the blooms into the pools — never lifts the saturated petals back toward the
   // neon blowout we just dialled out. Sampled by world XZ (flowers sit low).
   dapple: { ...dappleConfig, clampMax: 1, project: false },
+  wind: hedgeWind,
 });
 scene.add(flowerPatch.object);
 
@@ -571,8 +576,7 @@ fontLoader.load(
       widthRange: [0.32, 0.56],
       windRange: [0.1, 0.22],
       animated: true,
-      windScale: 3.2,
-      windSpeed: 1.0,
+      ...hedgeWind,
       yOffset: GROUND_Y,
       hueRange: [0.22, 0.33],
       saturationRange: [0.62, 0.86],
@@ -619,7 +623,7 @@ function updateCamera() {
 const clock = new THREE.Clock();
 const FLOWER_VISIT_CELL_SIZE = 1.15;
 const FLOWER_REENTRY_DELAY = 750;
-const FLOWER_LEVEL_DECAY = 50000;
+const FLOWER_LEVEL_DECAY = 10000;
 const FLOWER_SPAWN_STEP = 0.18;
 const TEXT_FLOWER_BAND = 0.5;
 const TEXT_FLOWER_EDGE_OFFSET = 0.2;

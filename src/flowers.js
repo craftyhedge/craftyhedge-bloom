@@ -14,95 +14,95 @@ const SPECIES = [
     stage: 0,
     name: 'indigo', palette: ['#416dff', '#294fe8', '#6790ff'],
     size: [0.6, 0.95], stem: [0.42, 0.58], tilt: 0.5, bloom: [1.4, 2.4],
-    form: { petals: 5, rings: 1, tip: 0.52, wide: 0.34, lift: 0.16, cup: 0.5, shape: 'round', disc: 0.16, discColor: 0xffdf62, discLift: 0.02 },
+    form: { petals: 5, rings: 1, tip: 0.52, wide: 0.34, lift: 0.13, cup: 0.3, closed: 1.05, open: 0.12, postureSpread: 0.2, shape: 'round', disc: 0.16, discColor: 0xffdf62, discLift: 0.02 },
   },
   {
     stage: 0,
     name: 'aqua', palette: ['#18e5d0', '#00bfb7', '#43f2df'],
     size: [0.45, 0.7], stem: [0.4, 0.54], tilt: 0.35, bloom: [2.2, 3.4],
-    form: { petals: 14, rings: 1, tip: 0.5, wide: 0.07, lift: 0.05, cup: 0.15, shape: 'spoon', disc: 0.2, discColor: 0xd6a32e, discLift: 0.05 },
+    form: { petals: 14, rings: 1, tip: 0.5, wide: 0.07, lift: 0.04, cup: 0.06, closed: 0.9, open: -0.16, shape: 'spoon', disc: 0.2, discColor: 0xd6a32e, discLift: 0.05 },
   },
   {
     stage: 0,
     name: 'blue', palette: ['#3e91ff', '#176de8', '#68adff'],
     size: [0.4, 0.62], stem: [0.46, 0.62], tilt: 0.6, bloom: [2.0, 3.0],
-    form: { petals: 8, rings: 2, tip: 0.5, wide: 0.13, lift: 0.22, cup: 0.6, shape: 'notch', disc: 0.1, discColor: 0xdff7ff, discLift: 0.06 },
+    form: { petals: 8, rings: 2, tip: 0.5, wide: 0.13, lift: 0.12, cup: 0.32, closed: 1.1, open: 0.1, ringLift: 0.2, postureSpread: 0.18, shape: 'notch', disc: 0.1, discColor: 0xdff7ff, discLift: 0.06 },
   },
   {
     stage: 0,
     name: 'emerald', palette: ['#35df91', '#17b86e', '#62efa9'],
     size: [0.4, 0.6], stem: [0.4, 0.52], tilt: 0.4, bloom: [2.6, 3.8],
-    form: { petals: 5, rings: 1, tip: 0.46, wide: 0.3, lift: 0.13, cup: 0.7, shape: 'round', disc: 0.12, discColor: 0xffe56b, discLift: 0.03 },
+    form: { petals: 5, rings: 1, tip: 0.46, wide: 0.3, lift: 0.12, cup: 0.38, closed: 1.0, open: 0.18, postureSpread: 0.22, shape: 'round', disc: 0.12, discColor: 0xffe56b, discLift: 0.03 },
   },
   {
     stage: 1,
     name: 'cobalt', palette: ['#526fff', '#354de0', '#748bff'],
     size: [0.35, 0.55], stem: [0.38, 0.5], tilt: 0.7, bloom: [2.4, 3.4],
-    form: { petals: 5, rings: 1, tip: 0.44, wide: 0.26, lift: 0.1, cup: 0.3, shape: 'point', disc: 0.08, discColor: 0xd6a32e, discLift: 0.02 },
+    form: { petals: 5, rings: 1, tip: 0.44, wide: 0.26, lift: 0.06, cup: 0.04, closed: 0.95, open: -0.2, shape: 'point', disc: 0.08, discColor: 0xd6a32e, discLift: 0.02 },
   },
   {
     stage: 1,
     name: 'sun-yellow', palette: ['#fff02e', '#ffc928', '#fff866'],
     size: [0.6, 0.95], stem: [0.48, 0.64], tilt: 0.55, bloom: [1.6, 2.6],
-    form: { petals: 8, rings: 1, tip: 0.54, wide: 0.2, lift: 0.12, cup: 0.35, shape: 'notch', disc: 0.16, discColor: 0xffa914, discLift: 0.04 },
+    form: { petals: 8, rings: 1, tip: 0.54, wide: 0.2, lift: 0.07, cup: 0.08, closed: 1.05, open: -0.12, shape: 'notch', disc: 0.16, discColor: 0xffa914, discLift: 0.04 },
   },
   {
     stage: 1,
     name: 'clear-cyan', palette: ['#27dfff', '#00addf', '#64ebff'],
     size: [0.48, 0.72], stem: [0.5, 0.68], tilt: 0.48, bloom: [2.0, 3.0],
-    form: { petals: 7, rings: 1, tip: 0.58, wide: 0.16, lift: 0.2, cup: 0.45, shape: 'point', disc: 0.12, discColor: 0xffed87, discLift: 0.05 },
+    form: { petals: 7, rings: 1, tip: 0.58, wide: 0.16, lift: 0.08, cup: 0.1, closed: 1.1, open: -0.18, shape: 'point', disc: 0.12, discColor: 0xffed87, discLift: 0.05 },
   },
   {
     stage: 1,
     name: 'tangerine', palette: ['#ff9f2f', '#ef741c', '#ffbd4d'],
     size: [0.52, 0.78], stem: [0.45, 0.62], tilt: 0.4, bloom: [1.8, 2.8],
-    form: { petals: 6, rings: 1, tip: 0.5, wide: 0.24, lift: 0.18, cup: 0.8, shape: 'round', disc: 0.13, discColor: 0xffdc50, discLift: 0.05 },
+    form: { petals: 6, rings: 1, tip: 0.5, wide: 0.24, lift: 0.15, cup: 0.5, closed: 1.15, open: 0.24, postureSpread: 0.18, shape: 'round', disc: 0.13, discColor: 0xffdc50, discLift: 0.05 },
   },
   {
     stage: 2,
     name: 'crimson-crown', palette: ['#ed3552', '#c91f3d', '#ff5e6e'],
     size: [0.72, 1.0], stem: [0.62, 0.82], tilt: 0.38, bloom: [1.4, 2.2],
-    form: { petals: 9, rings: 2, tip: 0.62, wide: 0.13, lift: 0.25, cup: 0.65, shape: 'notch', disc: 0.14, discColor: 0xffe278, discLift: 0.08 },
+    form: { petals: 9, rings: 2, tip: 0.62, wide: 0.13, lift: 0.14, cup: 0.34, closed: 1.2, open: 0.06, ringLift: 0.24, postureSpread: 0.2, shape: 'notch', disc: 0.14, discColor: 0xffe278, discLift: 0.08 },
   },
   {
     stage: 2,
     name: 'electric-blue', palette: ['#176cff', '#0047d6', '#269fff'],
     size: [0.65, 0.9], stem: [0.58, 0.78], tilt: 0.5, bloom: [1.5, 2.3],
-    form: { petals: 5, rings: 2, tip: 0.6, wide: 0.22, lift: 0.28, cup: 0.72, shape: 'spoon', disc: 0.1, discColor: 0xe9fbff, discLift: 0.08 },
+    form: { petals: 5, rings: 2, tip: 0.6, wide: 0.22, lift: 0.18, cup: 0.46, closed: 1.25, open: 0.2, ringLift: 0.25, postureSpread: 0.24, shape: 'spoon', disc: 0.1, discColor: 0xe9fbff, discLift: 0.08 },
   },
   {
     stage: 2,
     name: 'orange-crown', palette: ['#ff7424', '#e84a15', '#ff9b38'],
     size: [0.7, 0.96], stem: [0.56, 0.76], tilt: 0.42, bloom: [1.5, 2.4],
-    form: { petals: 11, rings: 1, tip: 0.58, wide: 0.12, lift: 0.22, cup: 0.5, shape: 'point', disc: 0.18, discColor: 0xfff0a8, discLift: 0.07 },
+    form: { petals: 11, rings: 1, tip: 0.58, wide: 0.12, lift: 0.07, cup: 0.04, closed: 1.05, open: -0.22, shape: 'point', disc: 0.18, discColor: 0xfff0a8, discLift: 0.07 },
   },
   {
     boundary: true,
     stage: 0,
     name: 'edge-bell', palette: ['#e8ffff', '#a8efff', '#c8f8ef'],
     size: [0.3, 0.46], stem: [0.3, 0.44], tilt: 0.32, bloom: [2.5, 3.6],
-    form: { petals: 6, rings: 1, tip: 0.38, wide: 0.16, lift: 0.18, cup: 0.9, shape: 'round', disc: 0.08, discColor: 0xffe66d, discLift: 0.04 },
+    form: { petals: 6, rings: 1, tip: 0.38, wide: 0.16, lift: 0.12, cup: 0.48, closed: 1.2, open: 0.22, shape: 'round', disc: 0.08, discColor: 0xffe66d, discLift: 0.04 },
   },
   {
     boundary: true,
     stage: 1,
     name: 'edge-star', palette: ['#fff43b', '#ffd21f', '#ffeb58'],
     size: [0.36, 0.54], stem: [0.34, 0.5], tilt: 0.38, bloom: [2.1, 3.2],
-    form: { petals: 7, rings: 1, tip: 0.42, wide: 0.1, lift: 0.16, cup: 0.48, shape: 'point', disc: 0.09, discColor: 0xf6ffff, discLift: 0.05 },
+    form: { petals: 7, rings: 1, tip: 0.42, wide: 0.1, lift: 0.06, cup: 0.04, closed: 1.0, open: -0.2, shape: 'point', disc: 0.09, discColor: 0xf6ffff, discLift: 0.05 },
   },
   {
     boundary: true,
     stage: 2,
     name: 'edge-trumpet', palette: ['#ff5e55', '#df3340', '#ff805f'],
     size: [0.42, 0.62], stem: [0.38, 0.56], tilt: 0.42, bloom: [1.8, 2.8],
-    form: { petals: 5, rings: 1, tip: 0.48, wide: 0.2, lift: 0.24, cup: 1.0, shape: 'spoon', disc: 0.08, discColor: 0xffef9c, discLift: 0.06 },
+    form: { petals: 5, rings: 1, tip: 0.48, wide: 0.2, lift: 0.16, cup: 0.62, closed: 1.3, open: 0.3, shape: 'spoon', disc: 0.08, discColor: 0xffef9c, discLift: 0.06 },
   },
   {
     boundary: true,
     stage: 2,
     name: 'edge-electric-blue', palette: ['#005dff', '#008cff', '#18c8ff'],
     size: [0.46, 0.66], stem: [0.4, 0.58], tilt: 0.36, bloom: [1.7, 2.7],
-    form: { petals: 8, rings: 2, tip: 0.46, wide: 0.1, lift: 0.22, cup: 0.65, shape: 'point', disc: 0.09, discColor: 0xd9ffff, discLift: 0.07 },
+    form: { petals: 8, rings: 2, tip: 0.46, wide: 0.1, lift: 0.07, cup: 0.1, closed: 1.15, open: -0.12, ringLift: 0.14, shape: 'point', disc: 0.09, discColor: 0xd9ffff, discLift: 0.07 },
   },
 ];
 
@@ -132,8 +132,9 @@ const STAGE_STYLE = [
 // ---------------------------------------------------------------------------
 
 function pushStrip(positions, colors, indices, c, build) {
-  // build(s) -> { x, y, z, hw, sideX, sideZ } centreline samples. Keep one
-  // shared vertex pair per sample so computed normals blend across the curve.
+  // build(s) -> { x, y, z, hw, sideX, sideZ, fold } centreline samples. Each
+  // sample has left, raised-centre, and right vertices: a shallow midrib fold
+  // gives the petal two softly lit faces instead of one obvious flat card.
   const samples = build();
   const base = positions.length / 3;
 
@@ -142,21 +143,28 @@ function pushStrip(positions, colors, indices, c, build) {
       sample.x - sample.sideX * sample.hw,
       sample.y,
       sample.z - sample.sideZ * sample.hw,
+      sample.x,
+      sample.y + sample.fold,
+      sample.z,
       sample.x + sample.sideX * sample.hw,
       sample.y,
       sample.z + sample.sideZ * sample.hw,
     );
-    colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
+    colors.push(c.r, c.g, c.b, c.r, c.g, c.b, c.r, c.g, c.b);
   }
 
   for (let s = 1; s < samples.length; s += 1) {
-    const previousLeft = base + (s - 1) * 2;
-    const previousRight = previousLeft + 1;
-    const currentLeft = base + s * 2;
-    const currentRight = currentLeft + 1;
+    const previousLeft = base + (s - 1) * 3;
+    const previousCenter = previousLeft + 1;
+    const previousRight = previousLeft + 2;
+    const currentLeft = base + s * 3;
+    const currentCenter = currentLeft + 1;
+    const currentRight = currentLeft + 2;
     indices.push(
-      previousLeft, currentLeft, currentRight,
-      previousLeft, currentRight, previousRight,
+      previousLeft, currentLeft, currentCenter,
+      previousLeft, currentCenter, previousCenter,
+      previousCenter, currentCenter, currentRight,
+      previousCenter, currentRight, previousRight,
     );
   }
 }
@@ -192,6 +200,7 @@ function makePetalGeometry(form) {
         y: lift + cup * tip * (t * t),
         z: 0,
         hw: wide * profile(t),
+        fold: wide * profile(t) * Math.sin(Math.PI * t) * 0.16,
         sideX: 0,
         sideZ: 1,
       });
@@ -221,7 +230,7 @@ function makeBaseGeometry(form) {
     indices.push(base, base + 1, base + 2);
   };
 
-  const stemColor = new THREE.Color(0x2f6b22);
+  const stemColor = new THREE.Color(0x78b84a);
   const sh = 0.03;
   pushTri(-sh, 0, 0, sh, 0, 0, 0, HEAD_Y, 0, stemColor);
   pushTri(0, 0, -sh, 0, 0, sh, 0, HEAD_Y, 0, stemColor);
@@ -257,8 +266,14 @@ export function createFlowerPatch({
   tiltScale = null,
   lifespan = [7, 14],
   dapple = null,
+  wind = {},
 } = {}) {
   const [LIFE_MIN, LIFE_MAX] = lifespan;
+  const {
+    windDirection = new THREE.Vector2(0.58, 0.82).normalize(),
+    windScale = 1,
+    windSpeed = 1.55,
+  } = wind;
 
   let randSeed = seed;
   const rand = () => {
@@ -268,7 +283,7 @@ export function createFlowerPatch({
 
   const tmpColor = new THREE.Color();
   const zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
-  const WIND = new THREE.Vector2(0.58, 0.82).normalize();
+  const WIND = windDirection.clone().normalize();
 
   // Reusable transform scratch.
   const headObj = new THREE.Object3D();   // flower head frame (pos/lean/spin/scale)
@@ -352,10 +367,21 @@ export function createFlowerPatch({
   // Compose the head frame for a flower (without scale-from-bloom applied to
   // children — bloom/fade scale is folded per element).
   function headMatrix(flower, scaleMul) {
+    const phase = flower.x * WIND.x + flower.z * WIND.y;
+    const t = windClock * windSpeed;
+    const windWave = Math.sin(t * 0.82 + phase * 0.72)
+      + Math.sin(t * 1.47 + phase * 1.18 + 1.9) * 0.55
+      + Math.sin(t * 2.65 + phase * 0.35 + flower.windPhase * 0.8) * 0.35;
+    const windBend = flower.windResponse * windWave * 0.055 * windScale / HEAD_Y;
+    const c = Math.cos(flower.rotation);
+    const rotationSine = Math.sin(flower.rotation);
+    const localWindX = WIND.x * c + WIND.y * rotationSine;
+    const localWindZ = -WIND.x * rotationSine + WIND.y * c;
+
     eScratch.set(
-      Math.cos(flower.tiltDir) * flower.tilt,
+      Math.cos(flower.tiltDir) * flower.tilt + localWindZ * windBend,
       flower.rotation,
-      Math.sin(flower.tiltDir) * flower.tilt,
+      Math.sin(flower.tiltDir) * flower.tilt - localWindX * windBend,
     );
     qScratch.setFromEuler(eScratch);
     pScratch.set(flower.x, yOffset + flower.y, flower.z);
@@ -374,14 +400,23 @@ export function createFlowerPatch({
   function writeAttachedPetal(form, petal) {
     const flower = petal.flower;
     const bloom = flower.bloom < 1 ? 1 - (1 - flower.bloom) * (1 - flower.bloom) : 1;
-    const head = headMatrix(flower, bloom);
+    const opening = bloom * bloom * (3 - 2 * bloom);
+    const petalGrowth = 0.18 + bloom * 0.82;
+    const head = headMatrix(flower, petalGrowth);
+    const { closed = 1.05, open = 0, ringLift = 0 } = form.species.form;
+    const posture = THREE.MathUtils.lerp(closed, open + petal.ring * ringLift, opening)
+      + petal.postureOffset;
     // Lift to the head height here (not baked into the geometry) so the petal's
     // own origin stays at its base — it then tumbles about its base when free,
     // not about the distant flower root.
     petalObj.position.set(0, HEAD_Y + petal.heightOffset, 0);
     // rotateY sends +X→(cos,-sin) so negate to match make\* placement (cos,+sin)
-    petalObj.rotation.set(petal.pitch, -petal.angle, petal.roll);
-    petalObj.scale.setScalar(petal.sizeVariation);
+    petalObj.rotation.set(petal.pitch, -petal.angle, posture + petal.roll);
+    petalObj.scale.set(
+      petal.sizeVariation * petal.lengthVariation,
+      petal.sizeVariation,
+      petal.sizeVariation * petal.widthVariation,
+    );
     petalObj.updateMatrix();
     worldMat.multiply(petalObj.matrix); // head · petalLocal  (worldMat held head)
     form.petalMesh.setMatrixAt(petal.slot, worldMat);
@@ -392,8 +427,11 @@ export function createFlowerPatch({
     eScratch.set(petal.rx, petal.ry, petal.rz);
     qScratch.setFromEuler(eScratch);
     pScratch.set(petal.x, petal.y, petal.z);
-    const s = petal.scale * petal.fade;
-    sScratch.set(s, s, s);
+    sScratch.set(
+      petal.scaleX * petal.fade,
+      petal.scaleY * petal.fade,
+      petal.scaleZ * petal.fade,
+    );
     worldMat.compose(pScratch, qScratch, sScratch);
     form.petalMesh.setMatrixAt(petal.slot, worldMat);
   }
@@ -460,6 +498,8 @@ export function createFlowerPatch({
       scale,
       tilt: rand() * species.tilt * localTiltScale,
       tiltDir: rand() * Math.PI * 2,
+      windPhase: rand() * Math.PI * 2,
+      windResponse: 0.12 + rand() * 0.14,
       bloom: 0.0001,
       bloomSpeed: species.bloom[0] + rand() * (species.bloom[1] - species.bloom[0]),
       age: 0,
@@ -504,20 +544,26 @@ export function createFlowerPatch({
       for (let i = 0; i < perRing; i += 1) {
         const petalStep = Math.PI * 2 / perRing;
         const angle = i * petalStep + phase + (rand() - 0.5) * petalStep * 0.22;
+        const postureSpread = form.species.form.postureSpread || 0.12;
         const petal = {
-          flower, angle, free: false, slot: -1,
+          flower, angle, ring, free: false, slot: -1,
           r: flower.r, g: flower.g, b: flower.b,
           // Cheap, stable imperfections keep cloned geometry from reading as a
           // radial stamp. These are folded into the existing instance matrix.
-          sizeVariation: 0.88 + rand() * 0.24,
-          heightOffset: (rand() - 0.5) * 0.045,
-          pitch: (rand() - 0.5) * 0.2,
-          roll: (rand() - 0.5) * 0.18,
+          sizeVariation: 0.95 + rand() * 0.1,
+          lengthVariation: 0.9 + rand() * 0.2,
+          widthVariation: 0.88 + rand() * 0.24,
+          heightOffset: (rand() - 0.5) * 0.07,
+          pitch: (rand() - 0.5) * 0.3,
+          roll: (rand() - 0.5) * 0.26,
+          postureOffset: (rand() - 0.5) * postureSpread,
           // free-state fields (unused until detach)
           x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
           rx: 0, ry: 0, rz: 0, dx: 0, dy: 0, dz: 0,
           flutter: rand() * Math.PI * 2, flutterRate: 1.8 + rand() * 1.6,
-          scale: flower.scale, fade: 1, age: 0, life: 4 + rand() * 2.5,
+          scale: flower.scale,
+          scaleX: flower.scale, scaleY: flower.scale, scaleZ: flower.scale,
+          fade: 1, age: 0, life: 4 + rand() * 2.5,
         };
         addPetal(form, petal);
         writeAttachedPetal(form, petal);
@@ -541,7 +587,9 @@ export function createFlowerPatch({
     eScratch.setFromQuaternion(qScratch);
     petal.x = pScratch.x; petal.y = pScratch.y; petal.z = pScratch.z;
     petal.rx = eScratch.x; petal.ry = eScratch.y; petal.rz = eScratch.z;
-    petal.scale = sScratch.x;
+    petal.scaleX = sScratch.x;
+    petal.scaleY = sScratch.y;
+    petal.scaleZ = sScratch.z;
     petal.free = true;
     petal.age = 0;
     petal.fade = 1;
@@ -678,9 +726,12 @@ export function createFlowerPatch({
 
         if (flower.bloom < 1) {
           flower.bloom = Math.min(1, flower.bloom + dt * flower.bloomSpeed);
-          for (const petal of flower.petalRecords) writeAttachedPetal(form, petal);
-          writeBase(form, flower.base);
         }
+
+        // Living flowers share the tufts' traveling wind field. Rebuild both
+        // stem and attached petals so the whole plant bends as one rooted form.
+        for (const petal of flower.petalRecords) writeAttachedPetal(form, petal);
+        writeBase(form, flower.base);
       }
 
       // 2) free petals: catch an updraft and swirl up & away over the hedge,
