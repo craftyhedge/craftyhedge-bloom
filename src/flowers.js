@@ -77,6 +77,54 @@ const SPECIES = [
     form: { petals: 11, rings: 1, tip: 0.58, wide: 0.12, lift: 0.07, cup: 0.04, closed: 1.05, open: -0.22, shape: 'point', disc: 0.18, discColor: 0xfff0a8, discLift: 0.07 },
   },
   {
+    stage: 3,
+    name: 'violet-spire', palette: ['#b64cff', '#7b26dc', '#dc78ff'],
+    size: [0.54, 0.74], stem: [0.66, 0.86], tilt: 0.25, bloom: [1.6, 2.3],
+    form: { petals: 4, rings: 5, tierHeight: 0.14, tierScale: 0.83, tierTwist: 0.62, tip: 0.38, wide: 0.14, lift: 0.1, cup: 0.42, closed: 1.25, open: 0.28, ringLift: 0.05, postureSpread: 0.12, shape: 'spoon', disc: 0.07, discColor: 0xffdf70, discLift: 0.03 },
+  },
+  {
+    stage: 3,
+    name: 'scarlet-spire', palette: ['#ff405c', '#d51f45', '#ff7480'],
+    size: [0.52, 0.72], stem: [0.68, 0.9], tilt: 0.23, bloom: [1.5, 2.2],
+    form: { petals: 5, rings: 5, tierHeight: 0.13, tierScale: 0.82, tierTwist: 0.5, tip: 0.34, wide: 0.11, lift: 0.08, cup: 0.3, closed: 1.18, open: 0.14, ringLift: 0.04, postureSpread: 0.1, shape: 'point', disc: 0.06, discColor: 0xfff0a0, discLift: 0.03 },
+  },
+  {
+    stage: 3,
+    name: 'azure-plume', palette: ['#27e6ff', '#087fd8', '#8bf4ff'],
+    size: [0.48, 0.68], stem: [0.74, 0.94], tilt: 0.3, bloom: [1.7, 2.5],
+    form: { petals: 3, rings: 7, tierHeight: 0.1, tierScale: 0.9, tierTwist: 0.92, tip: 0.46, wide: 0.08, lift: 0.05, cup: 0.08, closed: 1.05, open: -0.24, ringLift: 0.025, postureSpread: 0.08, shape: 'point', disc: 0.05, discColor: 0xeaffff, discLift: 0.02 },
+  },
+  {
+    stage: 3,
+    name: 'amber-pagoda', palette: ['#ffb52e', '#e86616', '#ffe06b'],
+    size: [0.58, 0.78], stem: [0.62, 0.82], tilt: 0.2, bloom: [1.4, 2.1],
+    form: { petals: 6, rings: 4, tierHeight: 0.18, tierScale: 0.72, tierTwist: 0.38, tip: 0.5, wide: 0.22, lift: 0.12, cup: 0.54, closed: 1.3, open: 0.32, ringLift: 0.08, postureSpread: 0.12, shape: 'round', disc: 0.08, discColor: 0x6c3515, discLift: 0.04 },
+  },
+  {
+    stage: 4,
+    name: 'moon-candelabra', palette: ['#f4f2ff', '#a9c8ff', '#d9aaff'],
+    size: [0.68, 0.9], stem: [0.72, 0.96], tilt: 0.2, bloom: [1.3, 2.0],
+    form: { petals: 7, rings: 3, tierHeight: 0.24, tierScale: 0.7, tierTwist: 0.32, tip: 0.66, wide: 0.16, lift: 0.15, cup: 0.18, closed: 1.15, open: -0.08, ringLift: 0.12, postureSpread: 0.16, shape: 'notch', disc: 0.11, discColor: 0xffd95c, discLift: 0.05 },
+  },
+  {
+    stage: 4,
+    name: 'gold-candelabra', palette: ['#fff43d', '#ffb51f', '#fff79a'],
+    size: [0.66, 0.88], stem: [0.7, 0.94], tilt: 0.18, bloom: [1.25, 1.9],
+    form: { petals: 6, rings: 3, tierHeight: 0.25, tierScale: 0.68, tierTwist: 0.4, tip: 0.7, wide: 0.2, lift: 0.13, cup: 0.12, closed: 1.08, open: -0.16, ringLift: 0.1, postureSpread: 0.14, shape: 'point', disc: 0.12, discColor: 0xff7b17, discLift: 0.05 },
+  },
+  {
+    stage: 4,
+    name: 'ruby-lantern', palette: ['#ff315f', '#a80e45', '#ff8097'],
+    size: [0.72, 0.94], stem: [0.78, 1.0], tilt: 0.16, bloom: [1.2, 1.8],
+    form: { petals: 4, rings: 4, tierHeight: 0.2, tierScale: 0.76, tierTwist: 0.78, tip: 0.72, wide: 0.3, lift: 0.2, cup: 0.72, closed: 1.42, open: 0.42, ringLift: 0.14, postureSpread: 0.18, shape: 'spoon', disc: 0.1, discColor: 0xffd36b, discLift: 0.06 },
+  },
+  {
+    stage: 4,
+    name: 'teal-orbit', palette: ['#22f0c7', '#00a99a', '#8bffe7'],
+    size: [0.7, 0.92], stem: [0.68, 0.9], tilt: 0.22, bloom: [1.35, 2.0],
+    form: { petals: 10, rings: 2, tierHeight: 0.34, tierScale: 0.58, tierTwist: 0.17, tip: 0.76, wide: 0.09, lift: 0.06, cup: 0.02, closed: 0.96, open: -0.32, ringLift: 0.08, postureSpread: 0.1, shape: 'point', disc: 0.2, discColor: 0xf2ffff, discLift: 0.04 },
+  },
+  {
     boundary: true,
     stage: 0,
     name: 'edge-bell', palette: ['#e8ffff', '#a8efff', '#c8f8ef'],
@@ -106,20 +154,31 @@ const SPECIES = [
   },
 ];
 
-const SPECIES_BY_STAGE = [0, 1, 2].map((stage) => (
-  SPECIES.flatMap((species, index) => !species.boundary && species.stage === stage ? [index] : [])
-));
-const BOUNDARY_SPECIES_BY_STAGE = [0, 1, 2].map((stage) => (
-  SPECIES.flatMap((species, index) => species.boundary && species.stage === stage ? [index] : [])
-));
+const SPECIES_INDEX = new Map(SPECIES.map((species, index) => [species.name, index]));
+const makeFamily = (...names) => names.map((name) => SPECIES_INDEX.get(name));
+
+// Each repeat visit advances through a deliberately contrasting sequence. The
+// previous generation remains visible through its longer lifetime, so spawning
+// more parent flowers here only muddies the change instead of clarifying it.
+const FIELD_FAMILIES = [
+  makeFamily('indigo', 'sun-yellow', 'orange-crown', 'violet-spire', 'moon-candelabra'),
+  makeFamily('aqua', 'tangerine', 'electric-blue', 'scarlet-spire', 'gold-candelabra'),
+  makeFamily('blue', 'cobalt', 'crimson-crown', 'azure-plume', 'ruby-lantern'),
+  makeFamily('emerald', 'clear-cyan', 'orange-crown', 'amber-pagoda', 'teal-orbit'),
+];
+const BOUNDARY_FAMILIES = [
+  makeFamily('edge-bell', 'edge-star', 'edge-electric-blue', 'violet-spire', 'moon-candelabra'),
+];
 
 // Make repeat visits readable even before the viewer notices a different petal
 // shape: later stages rise above the earlier carpet and step toward lighter,
 // more luminous colours.
 const STAGE_STYLE = [
-  { scale: 0.86, stem: 0.92, saturation: 0.06, lightness: 0 },
-  { scale: 1.06, stem: 1.08, saturation: 0.05, lightness: 0.015 },
-  { scale: 1.28, stem: 1.22, saturation: 0.08, lightness: 0.02 },
+  { scale: 0.86, stem: 0.92, life: 1, saturation: 0.06, lightness: 0 },
+  { scale: 1.06, stem: 1.08, life: 1.35, saturation: 0.05, lightness: 0.015 },
+  { scale: 1.28, stem: 1.22, life: 1.75, saturation: 0.08, lightness: 0.02 },
+  { scale: 1.42, stem: 1.34, life: 2.1, saturation: 0.09, lightness: 0.03 },
+  { scale: 1.56, stem: 1.46, life: 2.45, saturation: 0.1, lightness: 0.04 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -219,7 +278,13 @@ function makePetalGeometry(form) {
 // Stem + centre disc as one geometry (rooted; never floats). Stem/disc keep
 // their own baked colours; the per-instance tint barely moves the dark disc.
 function makeBaseGeometry(form) {
-  const { disc = 0.16, discColor = 0xffcf4d, discLift = 0.04 } = form;
+  const {
+    disc = 0.16,
+    discColor = 0xffcf4d,
+    discLift = 0.04,
+    rings = 1,
+    tierHeight = 0,
+  } = form;
   const positions = [];
   const colors = [];
   const indices = [];
@@ -232,8 +297,9 @@ function makeBaseGeometry(form) {
 
   const stemColor = new THREE.Color(0x78b84a);
   const sh = 0.03;
-  pushTri(-sh, 0, 0, sh, 0, 0, 0, HEAD_Y, 0, stemColor);
-  pushTri(0, 0, -sh, 0, 0, sh, 0, HEAD_Y, 0, stemColor);
+  const stemTop = HEAD_Y + tierHeight * (rings - 1);
+  pushTri(-sh, 0, 0, sh, 0, 0, 0, stemTop, 0, stemColor);
+  pushTri(0, 0, -sh, 0, 0, sh, 0, stemTop, 0, stemColor);
 
   const discSeg = 9;
   const cc = new THREE.Color(discColor);
@@ -241,9 +307,9 @@ function makeBaseGeometry(form) {
     const a0 = (i / discSeg) * Math.PI * 2;
     const a1 = ((i + 1) / discSeg) * Math.PI * 2;
     pushTri(
-      0, HEAD_Y + discLift + 0.04, 0,
-      Math.cos(a0) * disc, HEAD_Y + discLift, Math.sin(a0) * disc,
-      Math.cos(a1) * disc, HEAD_Y + discLift, Math.sin(a1) * disc,
+      0, stemTop + discLift + 0.04, 0,
+      Math.cos(a0) * disc, stemTop + discLift, Math.sin(a0) * disc,
+      Math.cos(a1) * disc, stemTop + discLift, Math.sin(a1) * disc,
       cc,
     );
   }
@@ -273,6 +339,7 @@ export function createFlowerPatch({
     windDirection = new THREE.Vector2(0.58, 0.82).normalize(),
     windScale = 1,
     windSpeed = 1.55,
+    windTurbulence = 0.3,
   } = wind;
 
   let randSeed = seed;
@@ -373,15 +440,22 @@ export function createFlowerPatch({
       + Math.sin(t * 1.47 + phase * 1.18 + 1.9) * 0.55
       + Math.sin(t * 2.65 + phase * 0.35 + flower.windPhase * 0.8) * 0.35;
     const windBend = flower.windResponse * windWave * 0.055 * windScale / HEAD_Y;
+    const crossPhase = -flower.x * WIND.y + flower.z * WIND.x;
+    const crossWave = Math.sin(t * 0.53 + crossPhase * 0.86 + 0.7)
+      + Math.sin(t * 1.21 - phase * 0.41 + flower.windPhase) * 0.45;
+    const crossBend = flower.windResponse * crossWave * 0.055
+      * windScale * windTurbulence / HEAD_Y;
     const c = Math.cos(flower.rotation);
     const rotationSine = Math.sin(flower.rotation);
-    const localWindX = WIND.x * c + WIND.y * rotationSine;
-    const localWindZ = -WIND.x * rotationSine + WIND.y * c;
+    const worldWindX = WIND.x * windBend - WIND.y * crossBend;
+    const worldWindZ = WIND.y * windBend + WIND.x * crossBend;
+    const localWindX = worldWindX * c + worldWindZ * rotationSine;
+    const localWindZ = -worldWindX * rotationSine + worldWindZ * c;
 
     eScratch.set(
-      Math.cos(flower.tiltDir) * flower.tilt + localWindZ * windBend,
+      Math.cos(flower.tiltDir) * flower.tilt + localWindZ,
       flower.rotation,
-      Math.sin(flower.tiltDir) * flower.tilt - localWindX * windBend,
+      Math.sin(flower.tiltDir) * flower.tilt - localWindX,
     );
     qScratch.setFromEuler(eScratch);
     pScratch.set(flower.x, yOffset + flower.y, flower.z);
@@ -407,19 +481,26 @@ export function createFlowerPatch({
     const wiltedOpening = opening * (1 - flower.wilt * 0.68);
     const petalGrowth = 0.18 + bloom * 0.82;
     const head = headMatrix(flower, petalGrowth);
-    const { closed = 1.05, open = 0, ringLift = 0 } = form.species.form;
+    const {
+      closed = 1.05,
+      open = 0,
+      ringLift = 0,
+      tierHeight = 0,
+      tierScale = 1,
+    } = form.species.form;
     const posture = THREE.MathUtils.lerp(closed, open + petal.ring * ringLift, wiltedOpening)
       + petal.postureOffset;
     // Lift to the head height here (not baked into the geometry) so the petal's
     // own origin stays at its base — it then tumbles about its base when free,
     // not about the distant flower root.
-    petalObj.position.set(0, HEAD_Y + petal.heightOffset, 0);
+    petalObj.position.set(0, HEAD_Y + petal.ring * tierHeight + petal.heightOffset, 0);
     // rotateY sends +X→(cos,-sin) so negate to match make\* placement (cos,+sin)
     petalObj.rotation.set(petal.pitch, -petal.angle, posture + petal.roll);
+    const ringScale = Math.pow(tierScale, petal.ring);
     petalObj.scale.set(
-      petal.sizeVariation * petal.lengthVariation,
-      petal.sizeVariation,
-      petal.sizeVariation * petal.widthVariation,
+      petal.sizeVariation * petal.lengthVariation * ringScale,
+      petal.sizeVariation * ringScale,
+      petal.sizeVariation * petal.widthVariation * ringScale,
     );
     petalObj.updateMatrix();
     worldMat.multiply(petalObj.matrix); // head · petalLocal  (worldMat held head)
@@ -484,9 +565,10 @@ export function createFlowerPatch({
 
   // --- placement ------------------------------------------------------------
 
-  function makeFlower(x, z, speciesIndex, growthScale = 1) {
+  function makeFlower(x, z, speciesIndex, growthScale = 1, growthStage = 0) {
     const species = SPECIES[speciesIndex];
-    const stageStyle = STAGE_STYLE[species.stage];
+    const stage = THREE.MathUtils.clamp(Math.floor(growthStage), 0, STAGE_STYLE.length - 1);
+    const stageStyle = STAGE_STYLE[stage];
     const localTiltScale = tiltScale ? tiltScale(x, z) : 1;
     tmpColor.set(species.palette[Math.floor(rand() * species.palette.length)]);
     tmpColor.offsetHSL(0, stageStyle.saturation, stageStyle.lightness);
@@ -507,11 +589,12 @@ export function createFlowerPatch({
       bloom: 0.0001,
       bloomSpeed: species.bloom[0] + rand() * (species.bloom[1] - species.bloom[0]),
       age: 0,
-      life: LIFE_MIN + rand() * (LIFE_MAX - LIFE_MIN),
+      life: (LIFE_MIN + rand() * (LIFE_MAX - LIFE_MIN)) * stageStyle.life,
       wilt: 0,
       wiltDuration: 0.8 + rand() * 0.45,
       wilting: false,
       dying: false,
+      stage,
       species: speciesIndex,
       radius: CROWN_RADIUS * scale,
       r: tmpColor.r, g: tmpColor.g, b: tmpColor.b,
@@ -520,7 +603,7 @@ export function createFlowerPatch({
     };
   }
 
-  function place(x, z, speciesIndex, pack = 0.62, growthScale = 1) {
+  function place(x, z, speciesIndex, pack = 0.62, growthScale = 1, growthStage = 0) {
     if (canGrow && !canGrow(x, z)) return false;
     const form = forms[speciesIndex];
     const np = form.species.form.petals;
@@ -530,7 +613,7 @@ export function createFlowerPatch({
     if (form.bases.length >= perBase) return false;
     if (form.petals.length + totalPetals > form.petalCap) return false;
 
-    const flower = makeFlower(x, z, speciesIndex, growthScale);
+    const flower = makeFlower(x, z, speciesIndex, growthScale, growthStage);
     for (let i = 0; i < flowers.length; i += 1) {
       const o = flowers[i];
       const dx = o.x - x, dz = o.z - z;
@@ -547,7 +630,7 @@ export function createFlowerPatch({
 
     // petals — one record per (ring, i), angle matches makeFlowerForm placement
     for (let ring = 0; ring < rings; ring += 1) {
-      const phase = (ring / rings) * (Math.PI / perRing);
+      const phase = ring * (form.species.form.tierTwist || Math.PI / (rings * perRing));
       for (let i = 0; i < perRing; i += 1) {
         const petalStep = Math.PI * 2 / perRing;
         const angle = i * petalStep + phase + (rand() - 0.5) * petalStep * 0.22;
@@ -600,7 +683,12 @@ export function createFlowerPatch({
     petal.free = true;
     petal.age = 0;
     petal.fade = 1;
-    petal.life = 2.0 + rand() * 2.2;         // wide spread: brisk to lingering
+    const flightLifeScale = THREE.MathUtils.lerp(
+      0.45,
+      1,
+      petal.flower.stage / (STAGE_STYLE.length - 1),
+    );
+    petal.life = (2.0 + rand() * 2.2) * flightLifeScale;
     // Almost no radial launch: the bloom simply lets go, then the shared wind
     // separates the petals. A tiny drift prevents perfectly stacked paths.
     const out = 0.01 + rand() * 0.035;
@@ -621,7 +709,7 @@ export function createFlowerPatch({
 
   // --- colony state ---------------------------------------------------------
   const fieldColony = {
-    species: SPECIES_BY_STAGE[0][Math.floor(rand() * SPECIES_BY_STAGE[0].length)],
+    family: Math.floor(rand() * FIELD_FAMILIES.length),
     stage: 0,
     x: 0,
     z: 0,
@@ -630,7 +718,7 @@ export function createFlowerPatch({
     initialized: false,
   };
   const boundaryColony = {
-    species: BOUNDARY_SPECIES_BY_STAGE[0][0],
+    family: Math.floor(rand() * BOUNDARY_FAMILIES.length),
     stage: 0,
     x: 0,
     z: 0,
@@ -640,19 +728,27 @@ export function createFlowerPatch({
   };
   let windClock = 0;
 
-  function scatterFromSet(x, z, growthStage, speciesByStage, colony, spread, maxTries) {
-    const stage = THREE.MathUtils.clamp(Math.floor(growthStage), 0, speciesByStage.length - 1);
-    const speciesSet = speciesByStage[stage];
+  function familyAt(x, z, familyCount) {
+    const gridX = Math.floor(x / 2.4);
+    const gridZ = Math.floor(z / 2.4);
+    const hash = Math.imul(gridX, 73856093) ^ Math.imul(gridZ, 19349663);
+    return (hash >>> 0) % familyCount;
+  }
+
+  function scatterFromFamilies(x, z, growthStage, families, colony, spread, maxTries) {
+    const stage = THREE.MathUtils.clamp(Math.floor(growthStage), 0, families[0].length - 1);
     const dcx = x - colony.x, dcz = z - colony.z;
-    if (!colony.initialized || stage !== colony.stage
-      || dcx * dcx + dcz * dcz > colony.radius * colony.radius || rand() < 0.025) {
-      colony.species = speciesSet[Math.floor(rand() * speciesSet.length)];
-      colony.stage = stage;
+    const startsNewColony = !colony.initialized
+      || dcx * dcx + dcz * dcz > colony.radius * colony.radius;
+    if (startsNewColony) {
+      colony.family = familyAt(x, z, families.length);
       colony.x = x; colony.z = z;
       colony.radius = maxTries === 1 ? 0.8 + rand() * 0.65 : 1.25 + rand() * 1.1;
       colony.vigor = 0.9 + rand() * 0.22;
       colony.initialized = true;
     }
+    colony.stage = stage;
+    const family = families[colony.family];
 
     const distanceFromCenter = Math.sqrt(
       (x - colony.x) * (x - colony.x) + (z - colony.z) * (z - colony.z),
@@ -673,13 +769,11 @@ export function createFlowerPatch({
       const a = rand() * Math.PI * 2;
       const fx = x + Math.cos(a) * r;
       const fz = z + Math.sin(a) * r;
-      const species = rand() < 0.08
-        ? speciesSet[Math.floor(rand() * speciesSet.length)]
-        : colony.species;
+      const species = family[stage];
       const edgeScale = THREE.MathUtils.lerp(0.74, 1.12, centerStrength);
       const growthScale = colony.vigor * edgeScale * (0.92 + rand() * 0.16);
       const pack = THREE.MathUtils.lerp(0.74, 0.5, centerStrength) + rand() * 0.08;
-      if (place(fx, fz, species, pack, growthScale)) planted.push({ x: fx, z: fz });
+      if (place(fx, fz, species, pack, growthScale, stage)) planted.push({ x: fx, z: fz });
     }
     return planted;
   }
@@ -688,12 +782,12 @@ export function createFlowerPatch({
     object: group,
     flowers,
     scatter(x, z, growthStage = 0) {
-      return scatterFromSet(x, z, growthStage, SPECIES_BY_STAGE, fieldColony, 0.85, 3);
+      return scatterFromFamilies(x, z, growthStage, FIELD_FAMILIES, fieldColony, 0.85, 3);
     },
 
     scatterBoundary(x, z, growthStage = 0) {
-      return scatterFromSet(
-        x, z, growthStage, BOUNDARY_SPECIES_BY_STAGE, boundaryColony, 0.18, 1,
+      return scatterFromFamilies(
+        x, z, growthStage, BOUNDARY_FAMILIES, boundaryColony, 0.18, 1,
       );
     },
 
@@ -781,9 +875,14 @@ export function createFlowerPatch({
 
           const wx = WIND.x * p.windGain * windRamp * gust;
           const wz = WIND.y * p.windGain * windRamp * gust;
-          p.x += (p.vx + wx + swirlX) * dt;
+          // Detached petals are light enough to catch smaller cross-currents
+          // than rooted plants. One broad sine gives curl without noise lookups.
+          const curl = Math.sin(
+            windClock * 0.9 + p.x * 0.72 - p.z * 0.48 + p.flutter * 0.2,
+          ) * p.windGain * windRamp * windTurbulence * 0.65;
+          p.x += (p.vx + wx - WIND.y * curl + swirlX) * dt;
           p.y += p.vy * dt;
-          p.z += (p.vz + wz + swirlZ) * dt;
+          p.z += (p.vz + wz + WIND.x * curl + swirlZ) * dt;
 
           // Lively tumble — petals spin as they ride the air.
           p.rx += (p.dx + swirlX * 1.5) * dt;

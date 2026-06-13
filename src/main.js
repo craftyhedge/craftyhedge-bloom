@@ -198,6 +198,7 @@ const hedgeWind = {
   windDirection: new THREE.Vector2(0.58, 0.82).normalize(),
   windScale: 3.2,
   windSpeed: 1.0,
+  windTurbulence: 0.32,
 };
 
 // Set once the near-letter fill blanket is built inside the async font load.
@@ -238,7 +239,10 @@ const mossTop = createTuftBlanket({
 scene.add(hedgeBase, mossTop.mesh);
 
 const flowerPatch = createFlowerPatch({
-  maxFlowers: 1200,
+  // Longer-lived generations overlap more heavily, so reserve enough slots per
+  // species that an established colony does not prevent fresh blooms spawning.
+  maxFlowers: 1800,
+  lifespan: [11, 19],
   yOffset: GROUND_Y,
   canGrow: (x, z) => isInVisibleHedge(x, z) && !(isUnderRockTest && isUnderRockTest(x, z)),
   // Keep stems upright beside the rock. Farther out they smoothly regain their
@@ -624,6 +628,10 @@ const clock = new THREE.Clock();
 const FLOWER_VISIT_CELL_SIZE = 1.15;
 const FLOWER_REENTRY_DELAY = 750;
 const FLOWER_LEVEL_DECAY = 10000;
+const FLOWER_LEVELS = 5;
+// Early changes arrive quickly; the architectural upper levels need repeated
+// returns so they feel cultivated rather than unlocked by a quick pointer waggle.
+const FLOWER_LEVEL_REVISITS = [0, 1, 1, 2, 3];
 const FLOWER_SPAWN_STEP = 0.18;
 const TEXT_FLOWER_BAND = 0.5;
 const TEXT_FLOWER_EDGE_OFFSET = 0.2;
@@ -637,6 +645,7 @@ function decayFlowerVisit(visit, now) {
   if (levelsLost <= 0) return false;
 
   visit.count -= levelsLost;
+  visit.progress = 0;
   visit.levelChangedAt += levelsLost * FLOWER_LEVEL_DECAY;
   return true;
 }
@@ -658,11 +667,17 @@ function getFlowerVisit(x, z, now) {
 
   let visit = flowerVisitGrid.get(key);
   if (!visit) {
-    visit = { count: 1, leftAt: -Infinity, levelChangedAt: now };
+    visit = { count: 1, progress: 0, leftAt: -Infinity, levelChangedAt: now };
     flowerVisitGrid.set(key, visit);
   } else if (!decayFlowerVisit(visit, now) && now - visit.leftAt >= FLOWER_REENTRY_DELAY) {
-    visit.count = Math.min(3, visit.count + 1);
-    visit.levelChangedAt = now;
+    if (visit.count < FLOWER_LEVELS) {
+      visit.progress += 1;
+      if (visit.progress >= FLOWER_LEVEL_REVISITS[visit.count]) {
+        visit.count += 1;
+        visit.progress = 0;
+        visit.levelChangedAt = now;
+      }
+    }
   }
 
   activeFlowerCell = key;

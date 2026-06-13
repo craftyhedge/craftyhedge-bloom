@@ -199,6 +199,7 @@ function createWindMaterial({
   windDirection = new THREE.Vector2(0.58, 0.82).normalize(),
   windScale = 1,
   windSpeed = 1.55,
+  windTurbulence = 0.3,
   dapple = null,
 } = {}) {
   // Lambert (diffuse-only), NOT Standard. MeshStandardNodeMaterial always carries
@@ -218,6 +219,7 @@ function createWindMaterial({
   const direction = uniform(windDirection);
   const scale = uniform(windScale);
   const speed = uniform(windSpeed);
+  const turbulence = uniform(windTurbulence);
 
   // Clean, proven sine-based wind (standard approach from good grass/foliage shaders).
   // Layered sines create smooth traveling gusts without sharp noise fronts or visible cells.
@@ -235,6 +237,8 @@ function createWindMaterial({
 
     // Global coherent phase: makes waves propagate along the wind direction
     const phase = dot(worldXZ, direction);
+    const crossDirection = vec2(direction.y.mul(-1), direction.x);
+    const crossPhase = dot(worldXZ, crossDirection);
     const t = time.mul(speed);
 
     // Three smooth sine layers at different freqs = organic gusting (no hard edges)
@@ -244,6 +248,8 @@ function createWindMaterial({
     const w3 = sin(t.mul(2.65).add(phase.mul(0.35)).add(windPhase.mul(0.8))).mul(0.35);
 
     const windSway = w1.add(w2).add(w3); // smooth ~[-1.9, 1.9] range before scaling
+    const crossSway = sin(t.mul(0.53).add(crossPhase.mul(0.86)).add(0.7))
+      .add(sin(t.mul(1.21).sub(phase.mul(0.41)).add(windPhase)).mul(0.45));
 
     const h = localPosition.y;
     const bendWeight = clamp(h.div(0.65), 0, 1);
@@ -253,6 +259,7 @@ function createWindMaterial({
     const sway = response.mul(windSway).mul(0.055).mul(scale);
 
     const lateral = bend.mul(sway);
+    const crossLateral = bend.mul(response).mul(crossSway).mul(0.055).mul(scale).mul(turbulence);
 
     // Slight tip droop + subtle base counter for natural curve
     const vert = bend.mul(bendWeight).mul(sway).mul(-0.055).add(
@@ -262,8 +269,9 @@ function createWindMaterial({
     // Remove only the component of wind that points into a nearby solid edge.
     // Tangential and outward motion remain, so foliage still moves beside rocks.
     const avoidanceNormal = windAvoidance.xy;
-    const inward = min(dot(direction, avoidanceNormal).mul(lateral), 0).mul(windAvoidance.z);
-    const worldWind = direction.mul(lateral).sub(avoidanceNormal.mul(inward));
+    const rawWorldWind = direction.mul(lateral).add(crossDirection.mul(crossLateral));
+    const inward = min(dot(rawWorldWind, avoidanceNormal), 0).mul(windAvoidance.z);
+    const worldWind = rawWorldWind.sub(avoidanceNormal.mul(inward));
 
     // Convert desired world sway into the tuft's local space.
     // This ensures *every* tuft sways in the exact same global wind direction,
@@ -418,6 +426,7 @@ export function createTuftBlanket({
   emissiveIntensity = 0,
   windScale = 1,
   windSpeed = 1.55,
+  windTurbulence = 0.3,
   dapple = null,
 } = {}) {
   const random = createSeededRandom(seed);
@@ -426,7 +435,15 @@ export function createTuftBlanket({
   const halfWidth = width * 0.5;
   const halfDepth = depth * 0.5;
   const geometry = shape === 'mat' ? makeMossMatGeometry() : makeLeafClumpGeometry();
-  const material = createWindMaterial({ roughness, emissive, emissiveIntensity, windScale, windSpeed, dapple });
+  const material = createWindMaterial({
+    roughness,
+    emissive,
+    emissiveIntensity,
+    windScale,
+    windSpeed,
+    windTurbulence,
+    dapple,
+  });
   const clumps = [];
 
   for (let zIndex = 0; zIndex < cellsZ; zIndex += 1) {
