@@ -401,10 +401,14 @@ export function createFlowerPatch({
     const flower = petal.flower;
     const bloom = flower.bloom < 1 ? 1 - (1 - flower.bloom) * (1 - flower.bloom) : 1;
     const opening = bloom * bloom * (3 - 2 * bloom);
+    // Before release, ease partway back toward the species' closed posture.
+    // Keeping this partial preserves the readable flower shape while making the
+    // final petal departure feel like the end of a living cycle.
+    const wiltedOpening = opening * (1 - flower.wilt * 0.68);
     const petalGrowth = 0.18 + bloom * 0.82;
     const head = headMatrix(flower, petalGrowth);
     const { closed = 1.05, open = 0, ringLift = 0 } = form.species.form;
-    const posture = THREE.MathUtils.lerp(closed, open + petal.ring * ringLift, opening)
+    const posture = THREE.MathUtils.lerp(closed, open + petal.ring * ringLift, wiltedOpening)
       + petal.postureOffset;
     // Lift to the head height here (not baked into the geometry) so the petal's
     // own origin stays at its base — it then tumbles about its base when free,
@@ -504,6 +508,9 @@ export function createFlowerPatch({
       bloomSpeed: species.bloom[0] + rand() * (species.bloom[1] - species.bloom[0]),
       age: 0,
       life: LIFE_MIN + rand() * (LIFE_MAX - LIFE_MIN),
+      wilt: 0,
+      wiltDuration: 0.8 + rand() * 0.45,
+      wilting: false,
       dying: false,
       species: speciesIndex,
       radius: CROWN_RADIUS * scale,
@@ -594,21 +601,22 @@ export function createFlowerPatch({
     petal.age = 0;
     petal.fade = 1;
     petal.life = 2.0 + rand() * 2.2;         // wide spread: brisk to lingering
-    // a "let go" outward with an upward catch as the air takes it
-    const out = 0.12 + rand() * 0.3;
+    // Almost no radial launch: the bloom simply lets go, then the shared wind
+    // separates the petals. A tiny drift prevents perfectly stacked paths.
+    const out = 0.01 + rand() * 0.035;
     const facing = petal.flower.rotation - petal.angle;
     petal.vx = Math.cos(facing) * out;
     petal.vz = Math.sin(facing) * out;
-    petal.vy = 0.3 + rand() * 0.5;           // initial upward catch
+    petal.vy = 0.06 + rand() * 0.12;
     // Flight character, varied widely per petal so the swarm isn't uniform —
-    // some snap away on a gust, others loop and dawdle.
-    petal.buoyancy = 0.5 + rand() * 0.9;     // how hard the updraft lifts
-    petal.swirl = 0.3 + rand() * 0.9;        // radius of the looping drift
-    petal.windGain = 0.9 + rand() * 1.6;     // how much the breeze carries it
-    petal.flutterRate = 1.6 + rand() * 2.4;
-    petal.dx = (rand() - 0.5) * 3.2;         // livelier tumble
-    petal.dy = (rand() - 0.5) * 3.2;
-    petal.dz = (rand() - 0.5) * 3.2;
+    // Motion develops after release, as though the air catches each petal.
+    petal.buoyancy = 0.35 + rand() * 0.65;
+    petal.swirl = 0.18 + rand() * 0.48;
+    petal.windGain = 0.7 + rand() * 1.1;
+    petal.flutterRate = 1.3 + rand() * 1.8;
+    petal.dx = (rand() - 0.5) * 1.8;
+    petal.dy = (rand() - 0.5) * 1.8;
+    petal.dz = (rand() - 0.5) * 1.8;
   }
 
   // --- colony state ---------------------------------------------------------
@@ -698,16 +706,28 @@ export function createFlowerPatch({
         + Math.sin(windClock * 0.7) * 0.45
         + Math.sin(windClock * 1.9 + 1.1) * 0.2;
 
-      // 1) flowers: bloom in; at end of life, detach petals + start base wilt
+      // 1) flowers: bloom in, close partway at end of life, then release petals
       for (let i = flowers.length - 1; i >= 0; i -= 1) {
         const flower = flowers[i];
         const form = forms[flower.species];
         flower.age += dt;
 
-        if (!flower.dying && flower.age >= flower.life) {
-          flower.dying = true;
-          for (const petal of flower.petalRecords) detach(form, petal);
-          flower.petalRecords.length = 0;
+        if (!flower.wilting && !flower.dying && flower.age >= flower.life) {
+          flower.wilting = true;
+        }
+
+        if (flower.wilting) {
+          const wiltProgress = Math.min(1, (flower.age - flower.life) / flower.wiltDuration);
+          flower.wilt = wiltProgress * wiltProgress * (3 - 2 * wiltProgress);
+
+          if (wiltProgress >= 1) {
+            flower.wilting = false;
+            flower.dying = true;
+            // Detach from the final, partly closed pose so there is no pop when
+            // the petals switch from rooted transforms to airborne physics.
+            for (const petal of flower.petalRecords) detach(form, petal);
+            flower.petalRecords.length = 0;
+          }
         }
 
         if (flower.dying) {
@@ -745,15 +765,16 @@ export function createFlowerPatch({
           p.age += dt;
           if (p.age >= p.life) { removePetal(form, i); continue; }
 
-          const windRamp = Math.min(1, p.age / 0.6);
+          const releaseProgress = Math.min(1, p.age / 1.1);
+          const windRamp = releaseProgress * releaseProgress * (3 - 2 * releaseProgress);
           p.flutter += dt * p.flutterRate;
           // Swirl: a slowly-rotating horizontal drift vector → looping path.
-          const swirlX = Math.cos(p.flutter) * p.swirl;
-          const swirlZ = Math.sin(p.flutter * 0.9 + 1.3) * p.swirl;
+          const swirlX = Math.cos(p.flutter) * p.swirl * windRamp;
+          const swirlZ = Math.sin(p.flutter * 0.9 + 1.3) * p.swirl * windRamp;
 
           // Buoyant lift that eases off as the petal tires, so it rises then
           // levels out high above the canopy instead of climbing forever.
-          const lift = p.buoyancy * Math.exp(-p.age * 0.5);
+          const lift = p.buoyancy * windRamp * Math.exp(-p.age * 0.5);
           p.vy += (lift - 0.18) * dt;          // gentle net rise, slight settle late
           p.vy = THREE.MathUtils.clamp(p.vy, -0.15, 0.9);
           p.vx *= 0.985; p.vz *= 0.985;        // initial nudge bleeds off slowly
