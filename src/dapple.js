@@ -79,6 +79,7 @@ export function createDappleNode({
   swayAmount = 0.12,
   fadeHeight = 0,
   project = true,
+  clampMax = 4,
   sunColor = new THREE.Color(0xfff0c8),
   shadeColor = new THREE.Color(0x6f86a8),
 } = {}) {
@@ -167,6 +168,14 @@ export function createDappleNode({
     // rather than recolors.
     const tint = mix(shade, sun, light);
 
-    return tint.mul(brightness);
+    // The dapple is a >1 multiplier in open sun (warm tint * brightness up to
+    // 1+boost). On the ground and letters that lift is the desired sunny look.
+    // On the moss tufts it multiplied already-bright tip vertex colours past 1.0,
+    // tone-mapping isolated tips to white — and because the pattern sways and the
+    // tufts blow in the wind, those over-bright tips flickered: the pixel sparkle.
+    // clampMax caps the per-channel multiplier so the dapple can still darken into
+    // shadow but never push a tuft above its own colour. Callers that want the sun
+    // boost (ground, rock) leave clampMax high; the tufts pass 1.0.
+    return clamp(tint.mul(brightness), vec3(0), vec3(clampMax));
   })();
 }

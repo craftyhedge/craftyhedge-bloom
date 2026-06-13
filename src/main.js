@@ -1,5 +1,4 @@
 import './styles.css';
-import gsap from 'gsap';
 import * as THREE from 'three/webgpu';
 import { createTuftBlanket } from './foliage.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
@@ -10,7 +9,6 @@ import { createDappleNode } from './dapple.js';
 
 const canvas = document.querySelector('#scene');
 const sceneStage = document.querySelector('[data-scene-stage]');
-const stats = document.querySelector('[data-scene-stats]');
 const fallback = document.querySelector('[data-webgpu-fallback]');
 
 const renderer = new THREE.WebGPURenderer({
@@ -173,12 +171,18 @@ const sunDirection = SUN_TARGET.clone().sub(SUN_POSITION).normalize();
 const dappleConfig = {
   sunDirection,
   scale: 0.4,
-  shadeMin: 0.8,
+  shadeMin: 0.9,
   sunBoost: 0.5,
   coverage: 0.5,
   swaySpeed: 0.6,
   swayAmount: 0.12,
 };
+
+// Tuft variant: same dapple, but the warm sun-pool multiplier is capped at 1.0
+// so it can only darken the moss, never push the already-bright tip vertex
+// colours past white. The uncapped boost is what blew out isolated swaying tips
+// into the flickering white sparkle. Ground/rock keep the full boost.
+const tuftDappleConfig = { ...dappleConfig, clampMax: 1 };
 
 // Set once the near-letter fill blanket is built inside the async font load.
 let fillTuftCount = 0;
@@ -207,7 +211,7 @@ const mossTop = createTuftBlanket({
   // flickering hot pixels ("sparkles") under the directional sun. Moss is matte
   // anyway, so kill the specular response entirely.
   roughness: 1,
-  dapple: dappleConfig,
+  dapple: tuftDappleConfig,
 });
 
 scene.add(hedgeBase, mossTop.mesh);
@@ -485,7 +489,7 @@ fontLoader.load(
     // glyph edge: a tuft is ~0.5 units wide and leans in the wind, so one rooted
     // just outside (or just inside near a wall) still fans its blades up over the
     // now-taller letter sides. Removing inside-or-near-edge clears those.
-    const TUFT_CULL_MARGIN = 0.2;
+    const TUFT_CULL_MARGIN = 0.3;
     const isUnderRock = (x, z) => {
       if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return true;
       const nearest = Math.min(
@@ -534,7 +538,7 @@ fontLoader.load(
       brightnessRange: [0.82, 1.08],
       shadeRange: [0.72, 1.1],
       roughness: 1,
-      dapple: dappleConfig,
+      dapple: tuftDappleConfig,
     });
     scene.add(fillTop.mesh);
     fillTuftCount = fillTop.mesh.count;
@@ -574,11 +578,9 @@ function animate() {
 }
 
 function updateStats() {
-  if (!stats) return;
-
   const backend = navigator.gpu ? 'WebGPU' : 'WebGL2 fallback';
   const tuftCount = mossTop.mesh.count + fillTuftCount;
-  stats.textContent = `${backend} / ${tuftCount.toLocaleString()} moss instances`;
+  console.log(`[craftyhedge] ${backend} / ${tuftCount.toLocaleString()} moss instances`);
 }
 
 async function start() {
@@ -593,13 +595,6 @@ async function start() {
 
   resize();
   renderer.setAnimationLoop(animate);
-
-  updateStats();
-
-  gsap
-    .timeline({ defaults: { ease: 'power3.out' } })
-    .from('.scene-panel', { y: -18, opacity: 0, duration: 0.7 })
-    .from('.scene-meter', { scaleX: 0, duration: 1.2, transformOrigin: 'left center' }, '-=0.35');
 }
 
 window.addEventListener('resize', resize);

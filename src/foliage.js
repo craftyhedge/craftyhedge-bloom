@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Fn, attribute, clamp, cos, dot, float, min, mix, mul, positionLocal, sin, time, uniform, vec2, vec3, vertexColor } from 'three/tsl';
+import { Fn, attribute, clamp, cos, dot, float, min, mix, mul, output, positionLocal, sin, time, uniform, vec2, vec3, vec4, vertexColor } from 'three/tsl';
 import { fbm, sampleHedgeDensity, sampleTerrainHeight } from './terrain.js';
 import { createDappleNode } from './dapple.js';
 
@@ -74,7 +74,13 @@ function makeLeafClumpGeometry() {
     const length = 0.08 + (i % 5) * 0.02;
     const right = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
     const forward = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
-    const root = forward.clone().multiplyScalar((i % 2) * 0.018).setY(0);
+    // Spread the roots outward AND give each blade a unique small Y so the 12
+    // near-horizontal strips don't pile up coplanar at the tuft centre. When they
+    // shared the same depth plane there, the top-down depth test tied between
+    // overlapping DoubleSide blades and the per-pixel winner flipped as the wind
+    // nudged them — that depth-fight flicker was the white pixel sparkle (it was
+    // never a shading effect, which is why no material change touched it).
+    const root = forward.clone().multiplyScalar(0.05 + (i % 3) * 0.03).setY(i * 0.006);
 
     pushCurvedLeaf({
       positions,
@@ -118,7 +124,9 @@ function makeMossMatGeometry() {
     const width = 0.28 + (i % 4) * 0.04;
     const right = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
     const forward = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
-    const root = forward.clone().multiplyScalar(0.04 + (i % 3) * 0.018).setY(0.01);
+    // Unique per-blade Y so the strips don't sit coplanar at one depth plane and
+    // z-fight from the top-down view (the wind-flicker sparkle).
+    const root = forward.clone().multiplyScalar(0.04 + (i % 3) * 0.018).setY(0.01 + i * 0.004);
 
     pushCurvedLeaf({
       positions,
@@ -187,12 +195,16 @@ function createWindMaterial({
   windSpeed = 1.55,
   dapple = null,
 } = {}) {
-  const material = new THREE.MeshStandardNodeMaterial({
+  // Lambert (diffuse-only), NOT Standard. MeshStandardNodeMaterial always carries
+  // a 0.04 dielectric specular term whose Fresnel lifts toward 1.0 at grazing
+  // angles — on the near-flat blade tops under the strong key light that produced
+  // bright specular glints, and because the blades sway those glints flickered
+  // per pixel: the white sparkle. Lambert has no specular lobe at all, so the
+  // highlight simply never forms. Foliage doesn't need specular anyway.
+  const material = new THREE.MeshLambertNodeMaterial({
     color: 0xffffff,
     emissive,
     emissiveIntensity,
-    metalness: 0,
-    roughness,
     side: THREE.DoubleSide,
     vertexColors: true,
   });
@@ -268,6 +280,11 @@ function createWindMaterial({
     // light pools that fall on the ground also brighten/darken the moss tufts.
     material.colorNode = mul(vertexColor(), createDappleNode(dapple));
   }
+
+  // Safety ceiling on the final shaded colour so no tuft pixel can blow out to
+  // pure white even from strong sky/key fill. Lambert already removes the
+  // specular glint that caused the sparkle; this just caps the diffuse peak.
+  material.outputNode = vec4(min(output.rgb, vec3(0.9)), output.a);
 
   return material;
 }
