@@ -170,15 +170,21 @@ function setClumpMatrix(clump, time = 0) {
 
   windAxis.set(windDirX, 0, windDirZ).normalize();
 
+  // Transient "growth push": a nearby flower breaking ground shoves the tuft
+  // outward (px/pz) and tips it away from the source. push in [0,1], eases to 0.
+  const push = clump.push || 0;
+  const pushX = (clump.pushX || 0) * push;
+  const pushZ = (clump.pushZ || 0) * push;
+
   dummy.position.set(
-    clump.x + windAxis.x * windSway,
+    clump.x + windAxis.x * windSway + pushX,
     clump.y,
-    clump.z + windAxis.z * windSway,
+    clump.z + windAxis.z * windSway + pushZ,
   );
   dummy.rotation.set(
-    windAxis.z * windSway * 0.85,
+    windAxis.z * windSway * 0.85 + pushZ * 0.9,
     clump.rotation + Math.sin(time * 0.24 + clump.phase) * 0.06,
-    -windAxis.x * windSway * 0.85,
+    -windAxis.x * windSway * 0.85 - pushX * 0.9,
   );
   dummy.scale.set(clump.width, clump.height, clump.width * clump.depth);
   dummy.updateMatrix();
@@ -493,10 +499,88 @@ export function createTuftBlanket({
   mesh.castShadow = false;
   mesh.receiveShadow = true;
 
+  // --- growth-push state ----------------------------------------------------
+  // A uniform spatial grid over the clumps so a flower spawn only touches the
+  // handful of tufts within its reach instead of scanning all of them. Cell
+  // size ~ the push radius. Disturbed clumps live in `active` and decay there.
+  const PUSH_RADIUS = 0.55;          // how far a growth event reaches (world units)
+  const PUSH_AMOUNT = 0.07;          // peak outward shove (subtle)
+  const PUSH_RISE = 9;              // 1/sec — how fast the swell eases in (fast, not instant)
+  const PUSH_DECAY = 2.6;            // 1/sec — settles back in ~0.4s
+  const cell = PUSH_RADIUS;
+  const grid = new Map();
+  const gridKey = (cx, cz) => `${cx},${cz}`;
+  const active = new Set();
+  // (Re)build the lookup grid and sync each clump's instance index. Must run
+  // after any reordering of `clumps` (e.g. removeWhere) or `update` would write
+  // a push to a stale slot — a tuft you never touched would lurch.
+  function rebuildGrid() {
+    grid.clear();
+    active.clear();
+    for (let i = 0; i < clumps.length; i += 1) {
+      const c = clumps[i];
+      c.index = i;
+      c.push = 0;
+      c.pushTarget = 0;
+      const k = gridKey(Math.floor(c.x / cell), Math.floor(c.z / cell));
+      let bucket = grid.get(k);
+      if (!bucket) { bucket = []; grid.set(k, bucket); }
+      bucket.push(c);
+    }
+  }
+  rebuildGrid();
+
   return {
     mesh,
     clumps,
-    update() {},
+    pushFrom(x, z, strength = 1) {
+      const cx = Math.floor(x / cell);
+      const cz = Math.floor(z / cell);
+      const r2 = PUSH_RADIUS * PUSH_RADIUS;
+      for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
+        for (let gz = cz - 1; gz <= cz + 1; gz += 1) {
+          const bucket = grid.get(gridKey(gx, gz));
+          if (!bucket) continue;
+          for (const c of bucket) {
+            const dx = c.x - x;
+            const dz = c.z - z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 >= r2 || d2 === 0) continue;
+            const d = Math.sqrt(d2);
+            // Closer tufts shove harder; normalise the direction to outward.
+            const falloff = (1 - d / PUSH_RADIUS) * strength;
+            // Keep the strongest concurrent push rather than summing (avoids a
+            // tuft caught between two flowers launching twice as far). Direction
+            // is the unit outward vector scaled by peak amount; setClumpMatrix
+            // re-scales it by the live (decaying) `push` factor each frame.
+            if (falloff > (c.pushTarget || 0)) {
+              c.pushTarget = falloff;
+              c.pushX = (dx / d) * PUSH_AMOUNT;
+              c.pushZ = (dz / d) * PUSH_AMOUNT;
+            }
+            active.add(c);
+          }
+        }
+      }
+    },
+    update(dt = 0) {
+      if (active.size === 0) return;
+      for (const c of active) {
+        // Two-stage easing so the tuft neither pops out nor pops back:
+        //  - `push` chases `pushTarget` quickly (the swell as growth shoulders in)
+        //  - `pushTarget` itself relaxes to 0 (the slow settle once it's grown)
+        // The result is a smooth round-trip rather than an instant displacement.
+        const target = c.pushTarget || 0;
+        c.push = (c.push || 0) + (target - (c.push || 0)) * Math.min(1, PUSH_RISE * dt);
+        c.pushTarget = Math.max(0, target - PUSH_DECAY * dt);
+        // Rewrite from the same rest pose (time 0) the blanket was baked at,
+        // plus the live push — the per-vertex sway is the shader's job, so we
+        // must NOT re-inject CPU wind here or the tuft would move twice.
+        mesh.setMatrixAt(c.index, setClumpMatrix(c, 0));
+        if (c.push < 0.001 && c.pushTarget <= 0) { c.push = 0; c.pushTarget = 0; active.delete(c); }
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    },
     removeWhere(predicate) {
       const originalCount = clumps.length;
       let writeIndex = 0;
@@ -531,6 +615,8 @@ export function createTuftBlanket({
 
       clumps.length = writeIndex;
       mesh.count = writeIndex;
+      // Clumps were reordered — resync indices and the push grid to match.
+      rebuildGrid();
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       geometry.getAttribute('windData').needsUpdate = true;

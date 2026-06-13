@@ -4,7 +4,8 @@ import { createTuftBlanket } from './foliage.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { abs, color, mix, normalWorld, oneMinus, positionWorld, smoothstep } from 'three/tsl';
+import { abs, color, mix, mx_fractal_noise_float, normalWorld, oneMinus, pass, positionWorld, smoothstep } from 'three/tsl';
+import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
 import { createDappleNode } from './dapple.js';
 import { createFlowerPatch } from './flowers.js';
 
@@ -19,8 +20,11 @@ const renderer = new THREE.WebGPURenderer({
 
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.6));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.28;
+// Neutral (Khronos PBR Neutral) instead of ACES: ACES rolls saturated brights
+// toward white, which was quietly pastel-ising the neon flowers. Neutral keeps
+// highlights in check while preserving saturation, so the cyberpunk palette pops.
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.3;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -187,8 +191,12 @@ const tuftDappleConfig = { ...dappleConfig, clampMax: 1 };
 
 // Set once the near-letter fill blanket is built inside the async font load.
 let fillTuftCount = 0;
+// Exposed so the spawn handler / animate loop can push these tufts as flowers grow.
+let fillTop = null;
 // Set once the glyph masks exist; lets the flower spawner skip the rock letters.
 let isUnderRockTest = null;
+// Nearest glyph boundary and outward direction, used by the text-edge flowers.
+let nearestRockEdgeTest = null;
 
 const mossTop = createTuftBlanket({
   width: HEDGE_WIDTH,
@@ -205,10 +213,10 @@ const mossTop = createTuftBlanket({
   windScale: 3.2,
   windSpeed: 1.0,
   yOffset: GROUND_Y,
-  hueRange: [0.21, 0.31],
-  saturationRange: [0.58, 0.78],
-  lightnessRange: [0.13, 0.42],
-  brightnessRange: [0.82, 1.08],
+  hueRange: [0.22, 0.33],
+  saturationRange: [0.62, 0.86],
+  lightnessRange: [0.24, 0.56],
+  brightnessRange: [0.9, 1.18],
   shadeRange: [0.72, 1.1],
   // Fully matte: sub-pixel double-sided blades with any specular lobe alias into
   // flickering hot pixels ("sparkles") under the directional sun. Moss is matte
@@ -223,10 +231,20 @@ const flowerPatch = createFlowerPatch({
   maxFlowers: 1200,
   yOffset: GROUND_Y,
   canGrow: (x, z) => isInVisibleHedge(x, z) && !(isUnderRockTest && isUnderRockTest(x, z)),
+  // Keep stems upright beside the rock. Farther out they smoothly regain their
+  // species lean, so no stem can angle through a letter wall.
+  tiltScale: (x, z) => {
+    if (!nearestRockEdgeTest) return 1;
+    return THREE.MathUtils.smoothstep(nearestRockEdgeTest(x, z).distance, 0.24, 0.6);
+  },
+  // Same drifting leaf-shadow as the moss, but capped at 1.0 so it only shades
+  // the blooms into the pools — never lifts the saturated petals back toward the
+  // neon blowout we just dialled out. Sampled by world XZ (flowers sit low).
+  dapple: { ...dappleConfig, clampMax: 1, project: false },
 });
 scene.add(flowerPatch.object);
 
-const sun = new THREE.DirectionalLight(0xfff2c4, 5.2);
+const sun = new THREE.DirectionalLight(0xfff2c4, 4.0);
 sun.position.copy(SUN_POSITION);
 sun.target.position.copy(SUN_TARGET);
 sun.castShadow = true;
@@ -242,7 +260,7 @@ sun.shadow.normalBias = 0.035;
 scene.add(sun);
 scene.add(sun.target);
 
-const skyLight = new THREE.HemisphereLight(0xd7fff1, 0x101008, 6.25);
+const skyLight = new THREE.HemisphereLight(0xd7fff1, 0x101008, 3.0);
 scene.add(skyLight);
 
 const rim = new THREE.DirectionalLight(0xa8d8ff, 0.42);
@@ -264,40 +282,19 @@ const textGroup = new THREE.Group();
 textGroup.userData.isCraftyHedgeText = true;
 scene.add(textGroup);
 
-function createRockTexture(size = 256) {
-  const data = new Uint8Array(size * size);
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const broad =
-        Math.sin(x * 0.19 + Math.sin(y * 0.08) * 2.4) * 0.34
-        + Math.sin(y * 0.27 - x * 0.06) * 0.24;
-      const grain =
-        Math.sin(x * 0.83 + y * 0.47) * 0.16
-        + Math.sin(x * 1.71 - y * 1.13) * 0.1;
-      const pits = Math.sin(x * 0.41) * Math.sin(y * 0.53) > 0.82 ? -0.42 : 0;
-      data[y * size + x] = THREE.MathUtils.clamp((0.56 + broad + grain + pits) * 255, 0, 255);
-    }
-  }
-
-  const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3.5, 3.5);
-  texture.needsUpdate = true;
-  return texture;
-}
-
-const rockTexture = createRockTexture();
 const rockMaterial = new THREE.MeshStandardNodeMaterial({
-  roughness: 1,
+  // Not fully matte: a little roughness headroom gives the broad letter faces a
+  // soft sun sheen and a real lit→shadow falloff, so the text reads as sculpted
+  // stone in sunlight instead of one flat even-toned slab (that was the dullness).
+  roughness: 0.62,
   metalness: 0,
-  bumpMap: rockTexture,
-  bumpScale: TEXT_SIZE * 0.012,
   flatShading: false,
   side: THREE.FrontSide,
 });
-const rockBaseColor = color(0xc8bfaa);
+// Near-white stone with the faintest warm tint — kept just shy of pure white so
+// the lowered roughness still produces a visible lit→shadow gradient across the
+// faces instead of clipping to a flat white slab.
+const rockBaseColor = color(0xe8e4d8);
 const mossBounceColor = color(0x698447);
 const lowSurface = oneMinus(smoothstep(
   GROUND_Y + TEXT_SIZE * 0.015,
@@ -328,12 +325,20 @@ const rockDapple = createDappleNode({
   project: false,
   fadeHeight: 0,
 });
+// Continuous world-space fractal noise — NOT a tiled texture, so it never repeats
+// or seams across the letters. Sampled by world XZ at a low frequency, it gives
+// each part of the stone its own broad weathering blotch. Output ~[-1,1] → remap
+// to a ±brightness wobble around 1.0.
+const rockMottle = mx_fractal_noise_float(positionWorld.xyz.mul(0.55), 4, 2, 0.5).mul(0.16).add(1);
 rockMaterial.colorNode = mix(rockBaseColor, mossBounceColor, bounceStrength)
+  .mul(rockMottle)
   .mul(oneMinus(contactShadow))
   .mul(rockDapple);
+// Only the subtle green moss-bounce on the lower walls is emissive. The white
+// top-face self-illumination (rockBaseColor × topSurface) was driving the letter
+// tops past 1.0 and making them glow — dropped, the sun lights them plenty.
 rockMaterial.emissiveNode = mossBounceColor
-  .mul(lowSurface.mul(wallSurface).mul(0.11))
-  .add(rockBaseColor.mul(topSurface).mul(0.16));
+  .mul(lowSurface.mul(wallSurface).mul(0.11));
 
 function pointInPolygon(x, y, polygon) {
   let inside = false;
@@ -450,7 +455,7 @@ fontLoader.load(
       const mesh = new THREE.Mesh(geometry, rockMaterial);
       mesh.userData.footprintCenter = { x: centerX, z: centerZ };
       mesh.castShadow = true;
-      mesh.receiveShadow = false;
+      mesh.receiveShadow = true;
       return mesh;
     }
 
@@ -509,7 +514,22 @@ fontLoader.load(
       return nearest < TUFT_CULL_MARGIN;
     };
 
-    isUnderRockTest = isUnderRock;
+    // Flowers are short, so they don't need the tuft's wide keep-out — only the
+    // rock itself plus a hair of clearance. Using the full TUFT_CULL_MARGIN here
+    // sealed the inner letter gaps (the A/R/O counters, slots between strokes):
+    // 0.3 from each facing wall closed any gap under ~0.6 wide. A tiny margin
+    // lets blooms fill those holes reliably while still keeping them off the rock.
+    const FLOWER_CULL_MARGIN = 0.06;
+    const isUnderRockForFlowers = (x, z) => {
+      if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return true;
+      const nearest = Math.min(
+        craftyMask.nearestEdge(x, z).distance,
+        hedgeMask.nearestEdge(x, z).distance,
+      );
+      return nearest < FLOWER_CULL_MARGIN;
+    };
+
+    isUnderRockTest = isUnderRockForFlowers;
     mossTop.removeWhere(isUnderRock);
 
     // Fine fill tufts that hug the letters: half-size, denser-spaced moss that
@@ -523,7 +543,12 @@ fontLoader.load(
       craftyMask.nearestEdge(x, z).distance,
       hedgeMask.nearestEdge(x, z).distance,
     );
-    const fillTop = createTuftBlanket({
+    nearestRockEdgeTest = (x, z) => {
+      const craftyEdge = craftyMask.nearestEdge(x, z);
+      const hedgeEdge = hedgeMask.nearestEdge(x, z);
+      return craftyEdge.distance < hedgeEdge.distance ? craftyEdge : hedgeEdge;
+    };
+    fillTop = createTuftBlanket({
       width: HEDGE_WIDTH,
       depth: HEDGE_DEPTH,
       centerX: HEDGE_CENTER_X,
@@ -543,10 +568,10 @@ fontLoader.load(
       windScale: 3.2,
       windSpeed: 1.0,
       yOffset: GROUND_Y,
-      hueRange: [0.21, 0.31],
-      saturationRange: [0.58, 0.78],
-      lightnessRange: [0.13, 0.42],
-      brightnessRange: [0.82, 1.08],
+      hueRange: [0.22, 0.33],
+      saturationRange: [0.62, 0.86],
+      lightnessRange: [0.24, 0.56],
+      brightnessRange: [0.9, 1.18],
       shadeRange: [0.72, 1.1],
       roughness: 1,
       dapple: tuftDappleConfig,
@@ -586,6 +611,61 @@ function updateCamera() {
 // Hover-to-bloom: project the pointer onto the ground plane and spawn flowers
 // where it passes over visible moss (but never on the bare rock letters).
 const clock = new THREE.Clock();
+const FLOWER_VISIT_CELL_SIZE = 1.15;
+const FLOWER_REENTRY_DELAY = 750;
+const FLOWER_LEVEL_DECAY = 50000;
+const FLOWER_SPAWN_STEP = 0.18;
+const TEXT_FLOWER_BAND = 0.5;
+const TEXT_FLOWER_EDGE_OFFSET = 0.2;
+const flowerVisitGrid = new Map();
+let activeFlowerCell = null;
+let lastFlowerSpawn = null;
+
+function decayFlowerVisit(visit, now) {
+  const elapsed = now - visit.levelChangedAt;
+  const levelsLost = Math.min(visit.count - 1, Math.floor(elapsed / FLOWER_LEVEL_DECAY));
+  if (levelsLost <= 0) return false;
+
+  visit.count -= levelsLost;
+  visit.levelChangedAt += levelsLost * FLOWER_LEVEL_DECAY;
+  return true;
+}
+
+function getFlowerVisit(x, z, now) {
+  const gx = Math.floor(x / FLOWER_VISIT_CELL_SIZE);
+  const gz = Math.floor(z / FLOWER_VISIT_CELL_SIZE);
+  const key = `${gx}:${gz}`;
+
+  if (key === activeFlowerCell) {
+    const visit = flowerVisitGrid.get(key);
+    decayFlowerVisit(visit, now);
+    return visit;
+  }
+
+  if (activeFlowerCell) {
+    flowerVisitGrid.get(activeFlowerCell).leftAt = now;
+  }
+
+  let visit = flowerVisitGrid.get(key);
+  if (!visit) {
+    visit = { count: 1, leftAt: -Infinity, levelChangedAt: now };
+    flowerVisitGrid.set(key, visit);
+  } else if (!decayFlowerVisit(visit, now) && now - visit.leftAt >= FLOWER_REENTRY_DELAY) {
+    visit.count = Math.min(3, visit.count + 1);
+    visit.levelChangedAt = now;
+  }
+
+  activeFlowerCell = key;
+  return visit;
+}
+
+function leaveFlowerArea() {
+  if (activeFlowerCell) {
+    flowerVisitGrid.get(activeFlowerCell).leftAt = performance.now();
+    activeFlowerCell = null;
+  }
+  lastFlowerSpawn = null;
+}
 
 function spawnFlowerAtPointer(event) {
   const rect = canvas.getBoundingClientRect();
@@ -596,18 +676,70 @@ function spawnFlowerAtPointer(event) {
   const ground = getGroundCorner(ndcX, ndcY);
   const { x, z } = ground;
 
-  if (!isInVisibleHedge(x, z)) return;
-  if (isUnderRockTest && isUnderRockTest(x, z)) return;
+  if (!isInVisibleHedge(x, z)) {
+    leaveFlowerArea();
+    return;
+  }
 
-  flowerPatch.scatter(x, z);
+  const underRock = isUnderRockTest && isUnderRockTest(x, z);
+  const rockEdge = nearestRockEdgeTest ? nearestRockEdgeTest(x, z) : null;
+  const growsOnTextBoundary = !underRock && rockEdge && rockEdge.distance <= TEXT_FLOWER_BAND;
+  if (underRock) {
+    leaveFlowerArea();
+    return;
+  }
+
+  const visit = getFlowerVisit(x, z, performance.now());
+  if (lastFlowerSpawn) {
+    const dx = x - lastFlowerSpawn.x;
+    const dz = z - lastFlowerSpawn.z;
+    if (dx * dx + dz * dz < FLOWER_SPAWN_STEP * FLOWER_SPAWN_STEP) return;
+  }
+  lastFlowerSpawn = { x, z };
+
+  // Each flower that breaks ground nudges the surrounding hedge tufts aside,
+  // so the moss reads as parting for the new growth rather than ignoring it.
+  let planted;
+  if (growsOnTextBoundary) {
+    const edgeX = x - rockEdge.x * rockEdge.distance;
+    const edgeZ = z - rockEdge.z * rockEdge.distance;
+    planted = flowerPatch.scatterBoundary(
+      edgeX + rockEdge.x * TEXT_FLOWER_EDGE_OFFSET,
+      edgeZ + rockEdge.z * TEXT_FLOWER_EDGE_OFFSET,
+      visit.count - 1,
+    );
+  } else {
+    planted = flowerPatch.scatter(x, z, visit.count - 1);
+  }
+  for (const p of planted) {
+    mossTop.pushFrom(p.x, p.z);
+    if (fillTop) fillTop.pushFrom(p.x, p.z);
+  }
 }
 
 canvas.addEventListener('pointermove', spawnFlowerAtPointer);
+canvas.addEventListener('pointerleave', leaveFlowerArea);
+canvas.addEventListener('pointercancel', leaveFlowerArea);
+
+// Bloom post-processing: scene → threshold bloom added back over the original.
+// Only the bright emissive flower blooms clear the threshold, so they throw a
+// neon halo while the moss/rock stay clean. strength/radius/threshold are the dials.
+const postProcessing = new THREE.PostProcessing(renderer);
+const scenePass = pass(scene, camera);
+const sceneColor = scenePass.getTextureNode('output');
+// Gentle, scene-wide bloom: a soft glow on genuine highlights now that the
+// lighting is balanced (nothing is over-driven past ~1.0 any more). Tasteful,
+// not a halo machine — strength, radius, threshold.
+const bloomPass = bloom(sceneColor, 0.1, 0.4, 0.8);
+postProcessing.outputNode = sceneColor.add(bloomPass);
 
 function animate() {
   updateCamera();
-  flowerPatch.update(clock.getDelta());
-  renderer.render(scene, camera);
+  const dt = clock.getDelta();
+  flowerPatch.update(dt);
+  mossTop.update(dt);
+  if (fillTop) fillTop.update(dt);
+  postProcessing.render();
 }
 
 function updateStats() {
