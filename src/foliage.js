@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
-import { Fn, attribute, clamp, cos, dot, float, floor, fract, min, mix, positionLocal, sin, time, uniform, vec2, vec3 } from 'three/tsl';
+import { Fn, attribute, clamp, cos, dot, float, min, mix, mul, positionLocal, sin, time, uniform, vec2, vec3, vertexColor } from 'three/tsl';
 import { fbm, sampleHedgeDensity, sampleTerrainHeight } from './terrain.js';
+import { createDappleNode } from './dapple.js';
 
 const dummy = new THREE.Object3D();
 const windAxis = new THREE.Vector3();
@@ -184,6 +185,7 @@ function createWindMaterial({
   windDirection = new THREE.Vector2(0.58, 0.82).normalize(),
   windScale = 1,
   windSpeed = 1.55,
+  dapple = null,
 } = {}) {
   const material = new THREE.MeshStandardNodeMaterial({
     color: 0xffffff,
@@ -260,6 +262,12 @@ function createWindMaterial({
       localWindZ,
     ));
   })();
+
+  if (dapple) {
+    // Multiply the dapple gobo into the per-instance vertex color so the same
+    // light pools that fall on the ground also brighten/darken the moss tufts.
+    material.colorNode = mul(vertexColor(), createDappleNode(dapple));
+  }
 
   return material;
 }
@@ -387,6 +395,7 @@ export function createTuftBlanket({
   emissiveIntensity = 0,
   windScale = 1,
   windSpeed = 1.55,
+  dapple = null,
 } = {}) {
   const random = createSeededRandom(seed);
   const cellsX = Math.ceil(width / spacing);
@@ -394,7 +403,7 @@ export function createTuftBlanket({
   const halfWidth = width * 0.5;
   const halfDepth = depth * 0.5;
   const geometry = shape === 'mat' ? makeMossMatGeometry() : makeLeafClumpGeometry();
-  const material = createWindMaterial({ roughness, emissive, emissiveIntensity, windScale, windSpeed });
+  const material = createWindMaterial({ roughness, emissive, emissiveIntensity, windScale, windSpeed, dapple });
   const clumps = [];
 
   for (let zIndex = 0; zIndex < cellsZ; zIndex += 1) {

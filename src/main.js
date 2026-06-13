@@ -6,6 +6,7 @@ import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { abs, color, mix, normalWorld, oneMinus, positionWorld, smoothstep } from 'three/tsl';
+import { createDappleNode } from './dapple.js';
 
 const canvas = document.querySelector('#scene');
 const sceneStage = document.querySelector('[data-scene-stage]');
@@ -20,7 +21,7 @@ const renderer = new THREE.WebGPURenderer({
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.6));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.03;
+renderer.toneMappingExposure = 1.28;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -164,6 +165,24 @@ const hedgeBase = new THREE.Mesh(
 hedgeBase.position.y = -0.012;
 hedgeBase.receiveShadow = true;
 
+// Shared "light through a tree" gobo, projected from the sun. Used by both the
+// moss ground and the rock text so the dappled pools line up across the scene.
+const SUN_POSITION = new THREE.Vector3(-6, 15, 8);
+const SUN_TARGET = new THREE.Vector3(0, 0, -2);
+const sunDirection = SUN_TARGET.clone().sub(SUN_POSITION).normalize();
+const dappleConfig = {
+  sunDirection,
+  scale: 0.4,
+  shadeMin: 0.8,
+  sunBoost: 0.5,
+  coverage: 0.5,
+  swaySpeed: 0.6,
+  swayAmount: 0.12,
+};
+
+// Set once the near-letter fill blanket is built inside the async font load.
+let fillTuftCount = 0;
+
 const mossTop = createTuftBlanket({
   width: HEDGE_WIDTH,
   depth: HEDGE_DEPTH,
@@ -184,14 +203,18 @@ const mossTop = createTuftBlanket({
   lightnessRange: [0.13, 0.42],
   brightnessRange: [0.82, 1.08],
   shadeRange: [0.72, 1.1],
-  roughness: 0.86,
+  // Fully matte: sub-pixel double-sided blades with any specular lobe alias into
+  // flickering hot pixels ("sparkles") under the directional sun. Moss is matte
+  // anyway, so kill the specular response entirely.
+  roughness: 1,
+  dapple: dappleConfig,
 });
 
 scene.add(hedgeBase, mossTop.mesh);
 
 const sun = new THREE.DirectionalLight(0xfff2c4, 5.2);
-sun.position.set(-6, 15, 8);
-sun.target.position.set(0, 0, -2);
+sun.position.copy(SUN_POSITION);
+sun.target.position.copy(SUN_TARGET);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -11;
@@ -205,7 +228,7 @@ sun.shadow.normalBias = 0.035;
 scene.add(sun);
 scene.add(sun.target);
 
-const skyLight = new THREE.HemisphereLight(0xd7fff1, 0x101008, 0.9);
+const skyLight = new THREE.HemisphereLight(0xd7fff1, 0x101008, 6.25);
 scene.add(skyLight);
 
 const rim = new THREE.DirectionalLight(0xa8d8ff, 0.42);
@@ -276,8 +299,24 @@ const contactShadow = oneMinus(smoothstep(
   positionWorld.y,
 )).mul(0.2);
 
+// Same projected canopy on the rock as on the moss, so the shadow shapes are
+// continuous from ground onto the letters. Projection keeps each cast-shadow
+// region coherent across cap + walls instead of giving every flat face one solid
+// tone. Slightly gentler so the text stays legible.
+const rockDapple = createDappleNode({
+  ...dappleConfig,
+  shadeMin: 0.74,
+  sunBoost: 0.16,
+  // No height-projection or height-fade on the letters: both read positionWorld.y,
+  // which is interpolated across the coarse bevel facets and snaps the dapple into
+  // straight tonal creases along facet edges (the artifact). Sampling by plain
+  // world XZ keeps the dapple coherent with the ground and crease-free on the text.
+  project: false,
+  fadeHeight: 0,
+});
 rockMaterial.colorNode = mix(rockBaseColor, mossBounceColor, bounceStrength)
-  .mul(oneMinus(contactShadow));
+  .mul(oneMinus(contactShadow))
+  .mul(rockDapple);
 rockMaterial.emissiveNode = mossBounceColor
   .mul(lowSurface.mul(wallSurface).mul(0.11))
   .add(rockBaseColor.mul(topSurface).mul(0.16));
@@ -364,7 +403,7 @@ const fontLoader = new FontLoader();
 fontLoader.load(
   'https://threejs.org/examples/fonts/helvetiker_bold.typeface.json',
   (font) => {
-    const extrusionDepth = TEXT_SIZE * 0.19;
+    const extrusionDepth = TEXT_SIZE * 0.14;
     const bevelThickness = TEXT_SIZE * 0.036;
 
     function createRockLetter(str) {
@@ -442,10 +481,65 @@ fontLoader.load(
       hedgeMesh.userData.footprintCenter.z,
       TEXT_CENTER_Z + TEXT_LINE_SPACING / 2,
     );
-    const isUnderRock = (x, z) => craftyMask.contains(x, z) || hedgeMask.contains(x, z);
+    // Cull tufts under the letters AND any rooted within a blade-reach of the
+    // glyph edge: a tuft is ~0.5 units wide and leans in the wind, so one rooted
+    // just outside (or just inside near a wall) still fans its blades up over the
+    // now-taller letter sides. Removing inside-or-near-edge clears those.
+    const TUFT_CULL_MARGIN = 0.2;
+    const isUnderRock = (x, z) => {
+      if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return true;
+      const nearest = Math.min(
+        craftyMask.nearestEdge(x, z).distance,
+        hedgeMask.nearestEdge(x, z).distance,
+      );
+      return nearest < TUFT_CULL_MARGIN;
+    };
 
     mossTop.removeWhere(isUnderRock);
-    mossTop.setWindAvoidance((x, z) => {
+
+    // Fine fill tufts that hug the letters: half-size, denser-spaced moss that
+    // grows into the bare halo the big-tuft cull leaves around the text. Short
+    // blades, so they can crowd much closer (FILL_CULL_MARGIN) than the big tufts
+    // without poking over the letter walls. Restricted to a band near the edges
+    // (FILL_BAND) so this stays a cheap near-text layer, not a whole-field pass.
+    const FILL_CULL_MARGIN = 0.08;
+    const FILL_BAND = 0.9;
+    const nearestRockEdge = (x, z) => Math.min(
+      craftyMask.nearestEdge(x, z).distance,
+      hedgeMask.nearestEdge(x, z).distance,
+    );
+    const fillTop = createTuftBlanket({
+      width: HEDGE_WIDTH,
+      depth: HEDGE_DEPTH,
+      centerX: HEDGE_CENTER_X,
+      centerZ: HEDGE_CENTER_Z,
+      visibilityTest: (x, z) => {
+        if (!isInVisibleHedge(x, z)) return false;
+        if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return false;
+        const edge = nearestRockEdge(x, z);
+        return edge >= FILL_CULL_MARGIN && edge <= FILL_BAND;
+      },
+      spacing: 0.1,
+      seed: 521,
+      heightRange: [0.12, 0.34],
+      widthRange: [0.32, 0.56],
+      windRange: [0.1, 0.22],
+      animated: true,
+      windScale: 3.2,
+      windSpeed: 1.0,
+      yOffset: GROUND_Y,
+      hueRange: [0.21, 0.31],
+      saturationRange: [0.58, 0.78],
+      lightnessRange: [0.13, 0.42],
+      brightnessRange: [0.82, 1.08],
+      shadeRange: [0.72, 1.1],
+      roughness: 1,
+      dapple: dappleConfig,
+    });
+    scene.add(fillTop.mesh);
+    fillTuftCount = fillTop.mesh.count;
+
+    const applyWindAvoidance = (blanket) => blanket.setWindAvoidance((x, z) => {
       const craftyEdge = craftyMask.nearestEdge(x, z);
       const hedgeEdge = hedgeMask.nearestEdge(x, z);
       const edge = craftyEdge.distance < hedgeEdge.distance ? craftyEdge : hedgeEdge;
@@ -456,6 +550,8 @@ fontLoader.load(
         influence: 1 - THREE.MathUtils.smoothstep(edge.distance, 0.08, 0.75),
       };
     });
+    applyWindAvoidance(mossTop);
+    applyWindAvoidance(fillTop);
     updateStats();
   }
 );
@@ -481,7 +577,7 @@ function updateStats() {
   if (!stats) return;
 
   const backend = navigator.gpu ? 'WebGPU' : 'WebGL2 fallback';
-  const tuftCount = mossTop.mesh.count;
+  const tuftCount = mossTop.mesh.count + fillTuftCount;
   stats.textContent = `${backend} / ${tuftCount.toLocaleString()} moss instances`;
 }
 
