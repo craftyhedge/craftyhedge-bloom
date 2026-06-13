@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Fn, attribute, clamp, cos, dot, float, floor, fract, mix, positionLocal, sin, time, uniform, vec2, vec3 } from 'three/tsl';
+import { Fn, attribute, clamp, cos, dot, float, floor, fract, min, mix, positionLocal, sin, time, uniform, vec2, vec3 } from 'three/tsl';
 import { fbm, sampleHedgeDensity, sampleTerrainHeight } from './terrain.js';
 
 const dummy = new THREE.Object3D();
@@ -205,6 +205,7 @@ function createWindMaterial({
   material.positionNode = Fn(() => {
     const windData = attribute('windData', 'vec4');
     const windPhase = attribute('windPhase', 'float');
+    const windAvoidance = attribute('windAvoidance', 'vec3');
     const origin = windData.xy;
     const rot = windData.z;
     const response = windData.w;
@@ -238,19 +239,25 @@ function createWindMaterial({
       float(1).sub(bendWeight).mul(sway).mul(0.012)
     );
 
-    // Convert desired world sway (direction * lateral) into the tuft's local space.
+    // Remove only the component of wind that points into a nearby solid edge.
+    // Tangential and outward motion remain, so foliage still moves beside rocks.
+    const avoidanceNormal = windAvoidance.xy;
+    const inward = min(dot(direction, avoidanceNormal).mul(lateral), 0).mul(windAvoidance.z);
+    const worldWind = direction.mul(lateral).sub(avoidanceNormal.mul(inward));
+
+    // Convert desired world sway into the tuft's local space.
     // This ensures *every* tuft sways in the exact same global wind direction,
     // regardless of how the tuft was randomly rotated when placed.
     const c = cos(rot);
     const s = sin(rot);
     // R(-rot) * direction
-    const localWindX = direction.x.mul(c).add(direction.y.mul(s));
-    const localWindZ = direction.x.mul(s.mul(-1)).add(direction.y.mul(c));
+    const localWindX = worldWind.x.mul(c).add(worldWind.y.mul(s));
+    const localWindZ = worldWind.x.mul(s.mul(-1)).add(worldWind.y.mul(c));
 
     return localPosition.add(vec3(
-      localWindX.mul(lateral),
+      localWindX,
       vert,
-      localWindZ.mul(lateral),
+      localWindZ,
     ));
   })();
 
@@ -356,6 +363,11 @@ export function createFoliageField({
 
 export function createTuftBlanket({
   size = 38,
+  width = size,
+  depth = size,
+  centerX = 0,
+  centerZ = 0,
+  visibilityTest = null,
   spacing = 0.34,
   seed = 91,
   heightRange = [0.22, 0.62],
@@ -377,29 +389,27 @@ export function createTuftBlanket({
   windSpeed = 1.55,
 } = {}) {
   const random = createSeededRandom(seed);
-  const cells = Math.ceil(size / spacing);
-  const count = cells * cells;
-  const half = size * 0.5;
+  const cellsX = Math.ceil(width / spacing);
+  const cellsZ = Math.ceil(depth / spacing);
+  const halfWidth = width * 0.5;
+  const halfDepth = depth * 0.5;
   const geometry = shape === 'mat' ? makeMossMatGeometry() : makeLeafClumpGeometry();
   const material = createWindMaterial({ roughness, emissive, emissiveIntensity, windScale, windSpeed });
-  const mesh = new THREE.InstancedMesh(geometry, material, count);
   const clumps = [];
-  const color = new THREE.Color();
-  const windData = new Float32Array(count * 4);
-  const windPhase = new Float32Array(count);
 
-  for (let zIndex = 0; zIndex < cells; zIndex += 1) {
-    for (let xIndex = 0; xIndex < cells; xIndex += 1) {
-      const x = -half + (xIndex + 0.5) * spacing + (random() - 0.5) * spacing * 0.72;
-      const z = -half + (zIndex + 0.5) * spacing + (random() - 0.5) * spacing * 0.72;
+  for (let zIndex = 0; zIndex < cellsZ; zIndex += 1) {
+    for (let xIndex = 0; xIndex < cellsX; xIndex += 1) {
+      const x = centerX - halfWidth + (xIndex + 0.5) * spacing + (random() - 0.5) * spacing * 0.72;
+      const z = centerZ - halfDepth + (zIndex + 0.5) * spacing + (random() - 0.5) * spacing * 0.72;
+      if (visibilityTest && !visibilityTest(x, z)) continue;
+
       const density = THREE.MathUtils.lerp(0.72, 1, sampleHedgeDensity(x, z));
       const localMass = fbm(x * 0.21 + 2.4, z * 0.21 - 7.8, 3);
       const height = THREE.MathUtils.lerp(heightRange[0], heightRange[1], density) * THREE.MathUtils.lerp(0.82, 1.18, random());
       const width = THREE.MathUtils.lerp(widthRange[0], widthRange[1], localMass) * THREE.MathUtils.lerp(0.86, 1.2, random());
-
       clumps.push({
         x,
-        y: sampleTerrainHeight(x, z) + yOffset,
+        y: yOffset,
         z,
         width,
         height,
@@ -414,6 +424,12 @@ export function createTuftBlanket({
     }
   }
 
+  const count = clumps.length;
+  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  const color = new THREE.Color();
+  const windData = new Float32Array(count * 4);
+  const windPhase = new Float32Array(count);
+  const windAvoidance = new Float32Array(count * 3);
   mesh.count = clumps.length;
 
   for (let i = 0; i < clumps.length; i += 1) {
@@ -441,6 +457,7 @@ export function createTuftBlanket({
 
   geometry.setAttribute('windData', new THREE.InstancedBufferAttribute(windData, 4));
   geometry.setAttribute('windPhase', new THREE.InstancedBufferAttribute(windPhase, 1));
+  geometry.setAttribute('windAvoidance', new THREE.InstancedBufferAttribute(windAvoidance, 3));
 
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) {
@@ -448,12 +465,66 @@ export function createTuftBlanket({
   }
 
   mesh.castShadow = false;
-  mesh.receiveShadow = false;
+  mesh.receiveShadow = true;
 
   return {
     mesh,
     clumps,
     update() {},
+    removeWhere(predicate) {
+      const originalCount = clumps.length;
+      let writeIndex = 0;
+
+      for (let readIndex = 0; readIndex < clumps.length; readIndex += 1) {
+        const clump = clumps[readIndex];
+        if (predicate(clump.x, clump.z)) continue;
+
+        if (writeIndex !== readIndex) {
+          clumps[writeIndex] = clump;
+          mesh.setMatrixAt(writeIndex, setClumpMatrix(clump));
+          mesh.getColorAt(readIndex, color);
+          mesh.setColorAt(writeIndex, color);
+
+          const writeWindIndex = writeIndex * 4;
+          const readWindIndex = readIndex * 4;
+          windData[writeWindIndex] = windData[readWindIndex];
+          windData[writeWindIndex + 1] = windData[readWindIndex + 1];
+          windData[writeWindIndex + 2] = windData[readWindIndex + 2];
+          windData[writeWindIndex + 3] = windData[readWindIndex + 3];
+          windPhase[writeIndex] = windPhase[readIndex];
+
+          const writeAvoidanceIndex = writeIndex * 3;
+          const readAvoidanceIndex = readIndex * 3;
+          windAvoidance[writeAvoidanceIndex] = windAvoidance[readAvoidanceIndex];
+          windAvoidance[writeAvoidanceIndex + 1] = windAvoidance[readAvoidanceIndex + 1];
+          windAvoidance[writeAvoidanceIndex + 2] = windAvoidance[readAvoidanceIndex + 2];
+        }
+
+        writeIndex += 1;
+      }
+
+      clumps.length = writeIndex;
+      mesh.count = writeIndex;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      geometry.getAttribute('windData').needsUpdate = true;
+      geometry.getAttribute('windPhase').needsUpdate = true;
+      geometry.getAttribute('windAvoidance').needsUpdate = true;
+
+      return originalCount - writeIndex;
+    },
+    setWindAvoidance(sampleAvoidance) {
+      for (let i = 0; i < clumps.length; i += 1) {
+        const clump = clumps[i];
+        const avoidance = sampleAvoidance(clump.x, clump.z);
+        const index = i * 3;
+        windAvoidance[index] = avoidance.x;
+        windAvoidance[index + 1] = avoidance.z;
+        windAvoidance[index + 2] = avoidance.influence;
+      }
+
+      geometry.getAttribute('windAvoidance').needsUpdate = true;
+    },
   };
 }
 

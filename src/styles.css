@@ -10,11 +10,24 @@
   body {
     min-width: 320px;
     min-height: 100vh;
-    overflow: hidden;
+    background: #10170f;
   }
 
   canvas {
     display: block;
+  }
+
+  .scene-stage {
+    position: relative;
+    width: 100%;
+    height: min(100svh, 1440px);
+    overflow: hidden;
+  }
+
+  @media (max-width: 640px) {
+    .scene-stage {
+      height: min(100svh, 170vw, 640px);
+    }
   }
 }
 

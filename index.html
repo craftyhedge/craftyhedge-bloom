@@ -10,10 +10,11 @@
     <title>Craftyhedge</title>
   </head>
   <body class="bg-[#10170f] text-white antialiased">
-    <canvas id="scene" class="fixed inset-0 h-full w-full"></canvas>
+    <div class="scene-stage" data-scene-stage>
+      <canvas id="scene" class="absolute inset-0 h-full w-full"></canvas>
 
-    <main class="pointer-events-none fixed inset-0">
-      <section class="flex min-h-screen items-start justify-between gap-4 p-4 sm:p-6">
+      <main class="pointer-events-none absolute inset-0">
+        <section class="flex h-full items-start justify-between gap-4 p-4 sm:p-6">
         <div class="scene-panel pointer-events-auto w-full max-w-xs rounded-md border border-white/15 bg-[#132015]/80 p-4 shadow-2xl shadow-black/25 backdrop-blur-md">
           <div class="flex items-center justify-between gap-3">
             <h1 class="text-lg font-black tracking-wide text-[#ecffd6]">Craftyhedge</h1>
@@ -32,8 +33,9 @@
           data-webgpu-fallback
           hidden
         ></p>
-      </section>
-    </main>
+        </section>
+      </main>
+    </div>
 
     <script type="module" src="/src/main.js"></script>
   </body>
