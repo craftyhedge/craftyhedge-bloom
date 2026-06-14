@@ -1,5 +1,9 @@
 # Craftyhedge
 
+**▶ [Live demo](https://craftyhedge.github.io/craftyhedge-bloom/)**
+
+Performance may vary.
+
 A bit of fun. This started as an excuse to play with **WebGPU** and Three.js, and to chase
 one idea in particular: what does it feel like to *grow* flowers with your cursor rather
 than just place them?
