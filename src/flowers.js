@@ -1,8 +1,8 @@
 import * as THREE from 'three/webgpu';
 import {
-  abs, attribute, cos, floor, instancedBufferAttribute, mix, mul, normalLocal,
-  normalView, positionLocal, sin, smoothstep, uniform, vec3, vec4, vertexColor,
-  transformNormalToView, vibrance,
+  abs, attribute, cos, floor, instancedBufferAttribute, min, mix, mul,
+  normalLocal, normalView, positionLocal, pow, sign, sin, smoothstep, uniform,
+  uniformArray, vec3, vec4, vertexColor, transformNormalToView, vibrance,
 } from 'three/tsl';
 import { createDappleNode } from './dapple.js';
 
@@ -280,7 +280,7 @@ function makePetalGeometry(form) {
         fold: wide * profile(t) * Math.sin(Math.PI * t) * 0.16,
         sideX: 0,
         sideZ: 1,
-      });
+    });
     }
     return out;
   });
@@ -415,6 +415,14 @@ function makeDetachedCenterGeometry(form) {
   return geometry;
 }
 
+function makeSharedPetalGeometry() {
+  return makePetalGeometry({});
+}
+
+function makeSharedCenterGeometry() {
+  return makeDetachedCenterGeometry({ disc: 1, discColor: 0xffffff });
+}
+
 // ---------------------------------------------------------------------------
 
 export function createFlowerPatch({
@@ -497,7 +505,8 @@ export function createFlowerPatch({
     const swayData = attribute('swayData', 'vec4');
     const rootX = swayData.x;
     const rootZ = swayData.y;
-    const windPhaseAttr = swayData.z;
+    const speciesIndex = floor(swayData.z.div(8));
+    const windPhaseAttr = swayData.z.sub(speciesIndex.mul(8));
     const response = responseNode;
 
     const t = windTimeUniform.mul(u_windSpeed);
@@ -533,35 +542,51 @@ export function createFlowerPatch({
   const sScratch = new THREE.Vector3();
   const eScratch = new THREE.Euler();
 
-  // Per-species base pool. It was sized as maxFlowers/SPECIES.length — i.e. the
-  // average share assuming flowers spread evenly across all species. But familyAt
-  // maps each 2.4-unit cell to ONE family and the stage picks one species within
-  // it, so hovering an area concentrates demand on a handful of species. Those
-  // few hit the even-share cap (~79) almost immediately and then refuse to plant
-  // — the patch goes permanently dead under the cursor while most species sit
-  // empty. Give each species enough headroom to absorb a heavy LOCAL share
-  // (several times the even share) so a worked area keeps filling. Total instance
-  // memory is still bounded — sparse species never allocate their bases.
+  // Preserve the old aggregate pool headroom while sharing it across species.
+  // Local colonies can concentrate heavily on one species, so the historical
+  // four-times average share remains useful as a capacity calculation.
   const PER_SPECIES_SHARE = 4;
   const perBase = Math.max(
     48,
     Math.ceil((maxFlowers / SPECIES.length) * PER_SPECIES_SHARE),
   );
 
-  // One shared dapple gobo for every flower material — it's a pure function of
+  // One shared dapple gobo for the shared flower materials — it's a pure function of
   // world position + time, so the same drifting light pools that fall on the moss
   // and ground also play across the blooms, grounding them in the scene.
   const dappleNode = dapple ? createDappleNode(dapple) : null;
 
-  const forms = SPECIES.map((species) => {
-    const petalGeo = makePetalGeometry(species.form);
-    const baseGeo = makeBaseGeometry(species.form);
-    const centerGeo = makeDetachedCenterGeometry(species.form);
+  const shapeIds = { round: 0, point: 1, spoon: 2, notch: 3 };
+  const petalMorphology = uniformArray(SPECIES.map(({ form }) => new THREE.Vector4(
+    form.tip || 0.5,
+    form.wide || 0.2,
+    form.lift || 0.12,
+    form.cup || 0.3,
+  )));
+  const petalShape = uniformArray(SPECIES.map(({ form }) => shapeIds[form.shape || 'round']));
+  const baseMorphology = uniformArray(SPECIES.map(({ form }) => new THREE.Vector4(
+    HEAD_Y + (form.tierHeight || 0) * ((form.rings || 1) - 1),
+    form.disc || 0.16,
+    form.discLift || 0.04,
+    0,
+  )));
+  const discColors = uniformArray(SPECIES.map(({ form }) => new THREE.Color(form.discColor || 0xffcf4d)));
 
-    const makeMesh = (geo, count, tintArr, isPetal = false, animateDisc = false) => {
-      const material = new (isPetal
-        ? THREE.MeshPhysicalNodeMaterial
-        : THREE.MeshStandardNodeMaterial)({
+  const petalGeo = makeSharedPetalGeometry();
+  const baseGeo = makeBaseGeometry({ disc: 1, discColor: 0xffffff, discLift: 0 });
+  const centerGeo = makeSharedCenterGeometry();
+  const baseCap = perBase * SPECIES.length;
+  const petalCap = SPECIES.reduce((total, species) => (
+    total + Math.ceil(perBase * species.form.petals * (species.form.rings || 1) * 1.8)
+  ), 0);
+  const centerCap = baseCap * 2;
+
+  const getSpeciesIndex = () => floor(attribute('swayData', 'vec4').z.div(8)).toInt();
+
+  const makeMesh = (geo, count, tintArr, isPetal = false, animateDisc = false) => {
+    const material = new (isPetal
+      ? THREE.MeshPhysicalNodeMaterial
+      : THREE.MeshStandardNodeMaterial)({
         color: 0xffffff,
         vertexColors: true,
         side: THREE.DoubleSide,
@@ -577,183 +602,222 @@ export function createFlowerPatch({
           clearcoatRoughness: 0.88,
         } : {}),
       });
-      // flowerTint is vec4: rgb tint + .w = per-instance sway response (folded
-      // here to stay under WebGPU's 8 vertex-buffer limit). tintArr is sized
-      // count*4; sway response lives at index*4+3.
-      const attr = new THREE.InstancedBufferAttribute(tintArr, 4);
-      geo.setAttribute('flowerTint', attr);
-      const tintNode = instancedBufferAttribute(attr);
-      const tinted = mul(vertexColor(), tintNode.xyz);
-      let petalTint = tinted;
-      if (isPetal) {
-        const tip = species.form.tip || 0.5;
-        const wide = species.form.wide || 0.2;
-        const along = positionLocal.x.sub(0.08).div(Math.max(0.01, tip - 0.08)).clamp(0, 1);
-        const fromMidrib = abs(positionLocal.z).div(Math.max(0.01, wide));
-        const midrib = smoothstep(0.08, 0.5, fromMidrib);
-        const baseFade = smoothstep(0.02, 0.32, along);
-        const edgeTissue = smoothstep(0.46, 0.92, fromMidrib);
-        const tissueLight = mix(0.8, 1.07, baseFade)
-          .mul(mix(0.9, 1, midrib))
-          .mul(mix(1, 1.045, edgeTissue));
-        petalTint = vibrance(tinted, 0.22).mul(tissueLight).mul(1.06);
-      }
-      // Fold the dapple into the base colour so blooms dim/warm with the same
-      // light pools as the moss instead of reading as flatly-lit decals on top.
-      const shadedTint = dappleNode ? mul(petalTint, dappleNode) : petalTint;
-      material.colorNode = shadedTint;
-      // Petals should respond to light rather than carrying a broad self-lit
-      // wash. A tiny emissive floor preserves saturated colour in deep shade.
-      material.emissiveNode = mul(petalTint, isPetal ? 0.085 : 0.14);
-      // Per-instance sway inputs: vec4 (rootX, rootZ, windPhase, rotation).
-      // response rides in flowerTint.w. Written once at placement; response is
-      // zeroed on detach so the free-flight CPU matrix is authoritative.
-      const swayData = new Float32Array(count * 4);
-      const swayDataAttr = new THREE.InstancedBufferAttribute(swayData, 4);
-      geo.setAttribute('swayData', swayDataAttr);
+    // flowerTint is vec4: rgb tint + .w = per-instance sway response (folded
+    // here to stay under WebGPU's 8 vertex-buffer limit). tintArr is sized
+    // count*4; sway response lives at index*4+3.
+    const attr = new THREE.InstancedBufferAttribute(tintArr, 4);
+    geo.setAttribute('flowerTint', attr);
+    const tintNode = instancedBufferAttribute(attr);
+    const speciesIndex = getSpeciesIndex();
+    const part = animateDisc ? attribute('basePart', 'float') : null;
+    const sourceColor = animateDisc
+      ? mix(vertexColor(), discColors.element(speciesIndex), part)
+      : vertexColor();
+    const tinted = mul(sourceColor, tintNode.xyz);
+    let petalTint = tinted;
+    let petalPosition = positionLocal;
+    if (isPetal) {
+      const t = positionLocal.x.sub(0.08).div(0.42).clamp(0, 1);
+      const side = sign(positionLocal.z);
+      const morph = petalMorphology.element(speciesIndex);
+      const e = sin(t.mul(Math.PI));
+      const roundProfile = pow(e, 0.62);
+      const pointProfile = pow(e, 1.6).mul(t.mul(0.55).oneMinus());
+      const spoonProfile = e.mul(0.35).add(
+        pow(sin(min(1, t.mul(1.15)).mul(Math.PI)), 2.2).mul(0.65),
+      );
+      const notchProfile = pow(e, 0.7);
+      const shape = petalShape.element(speciesIndex);
+      const profile = shape.lessThan(0.5).select(
+        roundProfile,
+        shape.lessThan(1.5).select(
+          pointProfile,
+          shape.lessThan(2.5).select(spoonProfile, notchProfile),
+        ),
+      );
+      const notchPullback = shape.greaterThan(2.5)
+        .and(t.greaterThan(0.8))
+        .select(t.sub(0.8).mul(morph.x).mul(0.5), 0);
+      const along = mix(0.08, morph.x, t).sub(notchPullback);
+      const halfWidth = morph.y.mul(profile);
+      const fold = halfWidth.mul(e).mul(0.16);
+      petalPosition = vec3(
+        along,
+        morph.z.add(morph.w.mul(morph.x).mul(t.mul(t))).add(side.abs().oneMinus().mul(fold)),
+        side.mul(halfWidth),
+      );
+      const fromMidrib = abs(side).mul(profile);
+      const midrib = smoothstep(0.08, 0.5, fromMidrib);
+      const baseFade = smoothstep(0.02, 0.32, along);
+      const edgeTissue = smoothstep(0.46, 0.92, fromMidrib);
+      const tissueLight = mix(0.8, 1.07, baseFade)
+        .mul(mix(0.9, 1, midrib))
+        .mul(mix(1, 1.045, edgeTissue));
+      petalTint = vibrance(tinted, 0.22).mul(tissueLight).mul(1.06);
+    }
+    // Fold the dapple into the base colour so blooms dim/warm with the same
+    // light pools as the moss instead of reading as flatly-lit decals on top.
+    const shadedTint = dappleNode ? mul(petalTint, dappleNode) : petalTint;
+    material.colorNode = shadedTint;
+    // Petals should respond to light rather than carrying a broad self-lit
+    // wash. A tiny emissive floor preserves saturated colour in deep shade.
+    material.emissiveNode = mul(petalTint, isPetal ? 0.085 : 0.14);
+    // Per-instance sway inputs: vec4 (rootX, rootZ, windPhase, rotation).
+    // response rides in flowerTint.w. Written once at placement; response is
+    // zeroed on detach so the free-flight CPU matrix is authoritative.
+    const swayData = new Float32Array(count * 4);
+    const swayDataAttr = new THREE.InstancedBufferAttribute(swayData, 4);
+    geo.setAttribute('swayData', swayDataAttr);
 
-      let pose = null;
-      if (isPetal) {
-        const poseA = new Float32Array(count * 4);
-        const poseB = new Float32Array(count * 4);
-        const poseAAttr = new THREE.InstancedBufferAttribute(poseA, 4);
-        const poseBAttr = new THREE.InstancedBufferAttribute(poseB, 4);
-        geo.setAttribute('petalPoseA', poseAAttr);
-        geo.setAttribute('petalPoseB', poseBAttr);
-        pose = { a: poseA, b: poseB, aAttr: poseAAttr, bAttr: poseBAttr };
-      }
+    let pose = null;
+    if (isPetal) {
+      const poseA = new Float32Array(count * 4);
+      const poseB = new Float32Array(count * 4);
+      const poseAAttr = new THREE.InstancedBufferAttribute(poseA, 4);
+      const poseBAttr = new THREE.InstancedBufferAttribute(poseB, 4);
+      geo.setAttribute('petalPoseA', poseAAttr);
+      geo.setAttribute('petalPoseB', poseBAttr);
+      pose = { a: poseA, b: poseB, aAttr: poseAAttr, bAttr: poseBAttr };
+    }
 
-      let discGrowth = null;
-      let discGrowthAttr = null;
-      if (isPetal) {
-        const poseA = instancedBufferAttribute(pose.aAttr);
-        const poseB = instancedBufferAttribute(pose.bAttr);
-        const packedTiltX = floor(poseB.w.div(4096));
-        const packedTiltZ = poseB.w.sub(packedTiltX.mul(4096));
-        const tiltX = packedTiltX.div(4095).mul(2).sub(1);
-        const tiltZ = packedTiltZ.div(4095).mul(2).sub(1);
-        const windRotation = makeWindRotation(tintNode.w);
+    let discGrowth = null;
+    let discGrowthAttr = null;
+    if (isPetal) {
+      const poseA = instancedBufferAttribute(pose.aAttr);
+      const poseB = instancedBufferAttribute(pose.bAttr);
+      const packedTiltX = floor(poseB.w.div(4096));
+      const packedTiltZ = poseB.w.sub(packedTiltX.mul(4096));
+      const tiltX = packedTiltX.div(4095).mul(2).sub(1);
+      const tiltZ = packedTiltZ.div(4095).mul(2).sub(1);
+      const windRotation = makeWindRotation(tintNode.w);
 
-        const posedPosition = rotateEulerXYZ(
-          positionLocal.mul(poseB.xyz),
-          poseA.x,
-          poseA.y,
-          poseA.z,
-        ).add(vec3(0, poseA.w, 0));
-        const attachedPosition = rotateEulerXYZ(
-          posedPosition,
-          tiltX.add(windRotation.w),
-          attribute('swayData', 'vec4').w,
-          tiltZ.sub(windRotation.z),
-        );
-        material.positionNode = tintNode.w.greaterThan(0).select(attachedPosition, positionLocal);
+      const posedPosition = rotateEulerXYZ(
+        petalPosition.mul(poseB.xyz),
+        poseA.x,
+        poseA.y,
+        poseA.z,
+      ).add(vec3(0, poseA.w, 0));
+      const attachedPosition = rotateEulerXYZ(
+        posedPosition,
+        tiltX.add(windRotation.w),
+        attribute('swayData', 'vec4').w,
+        tiltZ.sub(windRotation.z),
+      );
+      material.positionNode = tintNode.w.greaterThan(0).select(attachedPosition, petalPosition);
 
-        // Non-uniform petal scale requires inverse scale for its normal before
-        // applying the same petal/head rotations as the vertex position.
-        const posedNormal = rotateEulerXYZ(
-          normalLocal.div(poseB.xyz),
-          poseA.x,
-          poseA.y,
-          poseA.z,
-        );
-        const attachedNormal = rotateEulerXYZ(
-          posedNormal,
-          tiltX.add(windRotation.w),
-          attribute('swayData', 'vec4').w,
-          tiltZ.sub(windRotation.z),
-        );
-        const attachedNormalView = transformNormalToView(attachedNormal).normalize();
-        material.normalNode = tintNode.w.greaterThan(0).select(attachedNormalView, normalView);
-      } else if (animateDisc) {
-        // vec4 = disc radial growth, uniform head scale, rest tilt X, rest tilt Z.
-        // Widening this existing buffer keeps the geometry within WebGPU's
-        // vertex-buffer limit while letting bases use the exact petal head frame.
-        discGrowth = new Float32Array(count * 4);
-        discGrowthAttr = new THREE.InstancedBufferAttribute(discGrowth, 4);
-        geo.setAttribute('discGrowth', discGrowthAttr);
-        const baseData = instancedBufferAttribute(discGrowthAttr);
-        const part = attribute('basePart', 'float');
-        const radialScale = mix(1, baseData.x, part);
-        // Y is left unscaled: the disc sits at an absolute head height, so
-        // scaling its Y would slide it down the stem instead of resizing it.
-        // The shallow dome (domeH) reads fine; radial scale carries the size.
-        const windRotation = makeWindRotation(tintNode.w);
-        const rotation = attribute('swayData', 'vec4').w;
-        const grown = vec3(
-          positionLocal.x.mul(radialScale),
-          positionLocal.y,
-          positionLocal.z.mul(radialScale),
-        ).mul(baseData.y);
-        material.positionNode = rotateEulerXYZ(
-          grown,
-          baseData.z.add(windRotation.w),
-          rotation,
-          baseData.w.sub(windRotation.z),
-        );
+      // Non-uniform petal scale requires inverse scale for its normal before
+      // applying the same petal/head rotations as the vertex position.
+      const posedNormal = rotateEulerXYZ(
+        normalLocal.div(poseB.xyz),
+        poseA.x,
+        poseA.y,
+        poseA.z,
+      );
+      const attachedNormal = rotateEulerXYZ(
+        posedNormal,
+        tiltX.add(windRotation.w),
+        attribute('swayData', 'vec4').w,
+        tiltZ.sub(windRotation.z),
+      );
+      const attachedNormalView = transformNormalToView(attachedNormal).normalize();
+      material.normalNode = tintNode.w.greaterThan(0).select(attachedNormalView, normalView);
+    } else if (animateDisc) {
+      // vec4 = disc radial growth, uniform head scale, rest tilt X, rest tilt Z.
+      // Widening this existing buffer keeps the geometry within WebGPU's
+      // vertex-buffer limit while letting bases use the exact petal head frame.
+      discGrowth = new Float32Array(count * 4);
+      discGrowthAttr = new THREE.InstancedBufferAttribute(discGrowth, 4);
+      geo.setAttribute('discGrowth', discGrowthAttr);
+      const baseData = instancedBufferAttribute(discGrowthAttr);
+      const radialScale = mix(1, baseData.x, part);
+      const morph = baseMorphology.element(speciesIndex);
+      const stemPosition = vec3(
+        positionLocal.x,
+        positionLocal.y.div(HEAD_Y).mul(morph.x),
+        positionLocal.z,
+      );
+      const discPosition = vec3(
+        positionLocal.x.mul(morph.y),
+        morph.x.add(morph.z).add(positionLocal.y.sub(HEAD_Y)),
+        positionLocal.z.mul(morph.y),
+      );
+      const shapedPosition = mix(stemPosition, discPosition, part);
+      // Y is left unscaled: the disc sits at an absolute head height, so
+      // scaling its Y would slide it down the stem instead of resizing it.
+      // The shallow dome (domeH) reads fine; radial scale carries the size.
+      const windRotation = makeWindRotation(tintNode.w);
+      const rotation = attribute('swayData', 'vec4').w;
+      const grown = vec3(
+        shapedPosition.x.mul(radialScale),
+        shapedPosition.y,
+        shapedPosition.z.mul(radialScale),
+      ).mul(baseData.y);
+      material.positionNode = rotateEulerXYZ(
+        grown,
+        baseData.z.add(windRotation.w),
+        rotation,
+        baseData.w.sub(windRotation.z),
+      );
 
-        const grownNormal = normalLocal.div(vec3(radialScale, 1, radialScale));
-        const swayedNormal = rotateEulerXYZ(
-          grownNormal,
-          baseData.z.add(windRotation.w),
-          rotation,
-          baseData.w.sub(windRotation.z),
-        );
-        material.normalNode = transformNormalToView(swayedNormal).normalize();
-      }
-      const mesh = new THREE.InstancedMesh(geo, material, count);
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      for (let i = 0; i < count; i += 1) mesh.setMatrixAt(i, zeroMat);
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.count = count;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-      // sway shares the tint buffer for `response` (flowerTint.w), so detach's
-      // response-zeroing and tint writes both go through `attr`/`tintArr`.
-      const sway = { data: swayData, dataAttr: swayDataAttr, tintArr, tintAttr: attr };
-      return { mesh, attr, tintArr, discGrowth, discGrowthAttr, sway, pose };
-    };
+      const normalRadialScale = mix(1, morph.y.mul(radialScale), part);
+      const grownNormal = normalLocal.div(vec3(normalRadialScale, 1, normalRadialScale));
+      const swayedNormal = rotateEulerXYZ(
+        grownNormal,
+        baseData.z.add(windRotation.w),
+        rotation,
+        baseData.w.sub(windRotation.z),
+      );
+      material.normalNode = transformNormalToView(swayedNormal).normalize();
+    }
+    const mesh = new THREE.InstancedMesh(geo, material, count);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < count; i += 1) mesh.setMatrixAt(i, zeroMat);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.count = count;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    // sway shares the tint buffer for `response` (flowerTint.w), so detach's
+    // response-zeroing and tint writes both go through `attr`/`tintArr`.
+    const sway = { data: swayData, dataAttr: swayDataAttr, tintArr, tintAttr: attr };
+    return { mesh, attr, tintArr, discGrowth, discGrowthAttr, sway, pose };
+  };
 
-    // Headroom: detached petals linger in the pool while they drift, so allow
-    // ~1.8× a full field of attached petals before placement is refused.
-    const petalCap = Math.ceil(perBase * species.form.petals * (species.form.rings || 1) * 1.8);
-    const petalTint = new Float32Array(petalCap * 4);
-    const baseTint = new Float32Array(perBase * 4);
-    const petal = makeMesh(petalGeo, petalCap, petalTint, true);
-    const base = makeMesh(baseGeo, perBase, baseTint, false, true);
-    const centerCap = perBase * 2;
-    const centerMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      vertexColors: false,
-      side: THREE.DoubleSide,
-      metalness: 0,
-      roughness: 0.86,
-    });
-    const centerMesh = new THREE.InstancedMesh(centerGeo, centerMaterial, centerCap);
-    for (let i = 0; i < centerCap; i += 1) centerMesh.setMatrixAt(i, zeroMat);
-    centerMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    centerMesh.count = centerCap;
-    centerMesh.castShadow = true;
-    centerMesh.receiveShadow = true;
-    centerMesh.frustumCulled = false;
-
-    return {
-      species,
-      petalCap,
-      petalMesh: petal.mesh, petalAttr: petal.attr, petalTint: petalTint,
-      baseMesh: base.mesh, baseAttr: base.attr, baseTint: baseTint,
-      centerMesh, centerCap,
-      discGrowth: base.discGrowth, discGrowthAttr: base.discGrowthAttr,
-      petalSway: petal.sway, baseSway: base.sway,
-      petalPose: petal.pose,
-      petals: [],  // live petal records (attached or free)
-      bases: [],   // live base records (one per living flower head)
-      centers: [], // detached flower centres in free flight
-    };
+  const petalTint = new Float32Array(petalCap * 4);
+  const baseTint = new Float32Array(baseCap * 4);
+  const petal = makeMesh(petalGeo, petalCap, petalTint, true);
+  const base = makeMesh(baseGeo, baseCap, baseTint, false, true);
+  const centerMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: false,
+    side: THREE.DoubleSide,
+    metalness: 0,
+    roughness: 0.86,
   });
+  const centerMesh = new THREE.InstancedMesh(centerGeo, centerMaterial, centerCap);
+  for (let i = 0; i < centerCap; i += 1) centerMesh.setMatrixAt(i, zeroMat);
+  centerMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  centerMesh.count = centerCap;
+  centerMesh.castShadow = true;
+  centerMesh.receiveShadow = true;
+  centerMesh.frustumCulled = false;
 
+  const form = {
+    petalCap,
+    baseCap,
+    petalMesh: petal.mesh, petalAttr: petal.attr, petalTint,
+    baseMesh: base.mesh, baseAttr: base.attr, baseTint,
+    centerMesh, centerCap,
+    discGrowth: base.discGrowth, discGrowthAttr: base.discGrowthAttr,
+    petalSway: petal.sway, baseSway: base.sway,
+    petalPose: petal.pose,
+    petals: [],
+    bases: [],
+    centers: [],
+  };
+  const forms = [form];
   const group = new THREE.Group();
-  for (const f of forms) group.add(f.petalMesh, f.baseMesh, f.centerMesh);
+  group.add(form.petalMesh, form.baseMesh, form.centerMesh);
 
   const CROWN_RADIUS = 0.5;
   const flowers = [];
@@ -870,7 +934,7 @@ export function createFlowerPatch({
     const j = slot * 4;
     sway.data[j] = flower.x;
     sway.data[j + 1] = flower.z;
-    sway.data[j + 2] = flower.windPhase;
+    sway.data[j + 2] = flower.species * 8 + flower.windPhase;
     sway.data[j + 3] = flower.rotation;
     sway.tintArr[slot * 4 + 3] = response;
   }
@@ -928,6 +992,7 @@ export function createFlowerPatch({
   // baked head used, so detaching is seamless.
   function writeAttachedPetal(form, petal) {
     const flower = petal.flower;
+    const speciesForm = SPECIES[flower.species].form;
     const opening = flowerOpening(flower);
     const unfurlProgress = THREE.MathUtils.clamp(
       (opening - petal.unfurlDelay) / (1 - petal.unfurlDelay),
@@ -947,7 +1012,7 @@ export function createFlowerPatch({
       ringLift = 0,
       tierHeight = 0,
       tierScale = 1,
-    } = form.species.form;
+    } = speciesForm;
     const posture = THREE.MathUtils.lerp(closed, open + petal.ring * ringLift, wiltedOpening)
       + petal.postureOffset;
     // Lift to the head height here (not baked into the geometry) so the petal's
@@ -1143,12 +1208,12 @@ export function createFlowerPatch({
     family = -1,
     options = null,
   ) {
-    const form = forms[speciesIndex];
-    const np = form.species.form.petals;
-    const rings = form.species.form.rings || 1;
+    const speciesForm = SPECIES[speciesIndex].form;
+    const np = speciesForm.petals;
+    const rings = speciesForm.rings || 1;
     const perRing = np;
     const totalPetals = np * rings;
-    if (form.bases.length >= perBase) return false;
+    if (form.bases.length >= form.baseCap) return false;
     if (form.petals.length + totalPetals > form.petalCap) return false;
 
     const flower = makeFlower(
@@ -1170,11 +1235,11 @@ export function createFlowerPatch({
 
     // petals — one record per (ring, i), angle matches makeFlowerForm placement
     for (let ring = 0; ring < rings; ring += 1) {
-      const phase = ring * (form.species.form.tierTwist || Math.PI / (rings * perRing));
+      const phase = ring * (speciesForm.tierTwist || Math.PI / (rings * perRing));
       for (let i = 0; i < perRing; i += 1) {
         const petalStep = Math.PI * 2 / perRing;
         const angle = i * petalStep + phase + (rand() - 0.5) * petalStep * 0.22;
-        const postureSpread = form.species.form.postureSpread || 0.12;
+        const postureSpread = speciesForm.postureSpread || 0.12;
         // Keep a bloom chromatically coherent, but avoid every cloned petal
         // carrying the exact same flat RGB. Inner tiers sit slightly deeper;
         // individual petals get restrained hue/saturation/value variation.
@@ -1239,9 +1304,8 @@ export function createFlowerPatch({
     const architecture = species.architecture;
     const requestedStemCount = architecture.stems[0]
       + Math.floor(rand() * (architecture.stems[1] - architecture.stems[0] + 1));
-    const form = forms[speciesIndex];
     const petalsPerStem = species.form.petals * (species.form.rings || 1);
-    const availableBases = perBase - form.bases.length;
+    const availableBases = form.baseCap - form.bases.length;
     const availablePetalStems = Math.floor((form.petalCap - form.petals.length) / petalsPerStem);
     const stemCount = Math.min(requestedStemCount, availableBases, availablePetalStems);
     if (stemCount < 1) return false;
@@ -1429,7 +1493,7 @@ export function createFlowerPatch({
     qScratch.setFromEuler(eScratch);
     pScratch.set(center.x, center.y, center.z);
     const scale = center.scale * center.fade;
-    sScratch.set(scale, scale, scale);
+    sScratch.set(scale * center.disc, scale, scale * center.disc);
     worldMat.compose(pScratch, qScratch, sScratch);
     form.centerMesh.setMatrixAt(center.slot, worldMat);
     tmpColor.setRGB(
@@ -1452,7 +1516,14 @@ export function createFlowerPatch({
     pScratch.set(flower.x, yOffset + flower.y, flower.z);
     sScratch.set(headScale, headScale, headScale);
     worldMat.compose(pScratch, qSwayScratch, sScratch);
-    const { rings = 1, tierHeight = 0, discLift = 0.04, discColor = 0xffcf4d } = form.species.form;
+    const speciesForm = SPECIES[flower.species].form;
+    const {
+      rings = 1,
+      tierHeight = 0,
+      disc = 0.16,
+      discLift = 0.04,
+      discColor = 0xffcf4d,
+    } = speciesForm;
     pScratch.set(0, HEAD_Y + tierHeight * (rings - 1) + discLift, 0).applyMatrix4(worldMat);
     eScratch.setFromQuaternion(qSwayScratch);
     tmpColor.set(discColor);
@@ -1461,6 +1532,7 @@ export function createFlowerPatch({
       x: pScratch.x, y: pScratch.y, z: pScratch.z,
       rx: eScratch.x, ry: eScratch.y, rz: eScratch.z,
       scale: headScale * wiltDisc,
+      disc,
       r: tmpColor.r, g: tmpColor.g, b: tmpColor.b,
       vx: (rand() - 0.5) * 0.04,
       vy: 0.18 + rand() * 0.12,
@@ -1731,9 +1803,7 @@ export function createFlowerPatch({
       // Drive the GPU head sway. This single uniform replaces the per-petal
       // wind matrix recompute that used to run on the CPU every frame.
       windTimeUniform.value = windClock;
-      // Per-form dirty tracking: only re-upload a form's buffers if it actually
-      // wrote a matrix this frame (a flower of that species bloomed/wilted/died
-      // or had free petals). A settled or empty species uploads nothing.
+      // Only upload the shared pools when some live flower changed their data.
       for (const form of forms) form.dirty = false;
       // Gusting: the breeze surges and lulls instead of a flat constant push.
       // Two offset sines → an irregular gust factor roughly in [0.6, 1.9].
@@ -1744,7 +1814,6 @@ export function createFlowerPatch({
       // 1) flowers: bloom in, close partway at end of life, then release petals
       for (let i = flowers.length - 1; i >= 0; i -= 1) {
         const flower = flowers[i];
-        const form = forms[flower.species];
         flower.age += dt;
 
         if (!flower.wilting && !flower.dying && flower.age >= flower.life) {
