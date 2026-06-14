@@ -22,7 +22,7 @@ const SPECIES = [
   },
   {
     stage: 0,
-    name: 'aqua', palette: ['#18e5d0', '#00bfb7', '#43f2df'],
+    name: 'aqua', palette: ['#3ce0a0', '#15bd86', '#6ff2bf'],
     size: [0.45, 0.7], stem: [0.4, 0.54], tilt: 0.35, bloom: [2.2, 3.4],
     form: { petals: 14, rings: 1, tip: 0.5, wide: 0.07, lift: 0.04, cup: 0.06, closed: 0.9, open: -0.16, shape: 'spoon', disc: 0.2, discColor: 0xd6a32e, discLift: 0.05 },
   },
@@ -34,7 +34,7 @@ const SPECIES = [
   },
   {
     stage: 0,
-    name: 'emerald', palette: ['#35df91', '#17b86e', '#62efa9'],
+    name: 'emerald', palette: ['#4cd860', '#2aa83f', '#7ce882'],
     size: [0.4, 0.6], stem: [0.4, 0.52], tilt: 0.4, bloom: [2.6, 3.8],
     architecture: {
       type: 'root-clump', stems: [4, 6], rootSpread: 0.07,
@@ -138,7 +138,7 @@ const SPECIES = [
   },
   {
     stage: 4,
-    name: 'teal-orbit', palette: ['#22f0c7', '#00a99a', '#8bffe7'],
+    name: 'teal-orbit', palette: ['#46ec9c', '#149e6e', '#9bffce'],
     size: [0.7, 0.92], stem: [0.68, 0.9], tilt: 0.22, bloom: [1.35, 2.0],
     form: { petals: 10, rings: 2, tierHeight: 0.34, tierScale: 0.58, tierTwist: 0.17, tip: 0.76, wide: 0.09, lift: 0.06, cup: 0.02, closed: 0.96, open: -0.32, ringLift: 0.08, postureSpread: 0.1, shape: 'point', disc: 0.2, discColor: 0xf2ffff, discLift: 0.04 },
   },
@@ -321,18 +321,39 @@ function makeBaseGeometry(form) {
   pushTri(-sh, 0, 0, sh, 0, 0, 0, stemTop, 0, stemColor);
   pushTri(0, 0, -sh, 0, 0, sh, 0, stemTop, 0, stemColor);
 
-  const discSeg = 9;
+  // A smooth, gently domed centre instead of a flat fan: a high segment count
+  // kills the faceted-polygon silhouette, and concentric rings round the profile
+  // so the disc reads as a soft mound that catches light, not a flat card.
+  const discSeg = 28;
+  const discRings = 3;
+  const domeH = 0.04;          // apex height above the rim
   const cc = new THREE.Color(discColor);
-  for (let i = 0; i < discSeg; i += 1) {
-    const a0 = (i / discSeg) * Math.PI * 2;
-    const a1 = ((i + 1) / discSeg) * Math.PI * 2;
-    pushTri(
-      0, stemTop + discLift + 0.04, 0,
-      Math.cos(a0) * disc, stemTop + discLift, Math.sin(a0) * disc,
-      Math.cos(a1) * disc, stemTop + discLift, Math.sin(a1) * disc,
-      cc,
-      1,
-    );
+  const discY = stemTop + discLift;
+  // Ring radius/height follow a hemispherical-ish profile (sin radius, cos height).
+  const ringPoint = (ring, i) => {
+    const t = ring / discRings;                 // 0 at apex … 1 at rim
+    const r = Math.sin((t * Math.PI) / 2) * disc;
+    const y = discY + Math.cos((t * Math.PI) / 2) * domeH;
+    const a = (i / discSeg) * Math.PI * 2;
+    return [Math.cos(a) * r, y, Math.sin(a) * r];
+  };
+  for (let ring = 0; ring < discRings; ring += 1) {
+    for (let i = 0; i < discSeg; i += 1) {
+      if (ring === 0) {
+        // Apex cap: fan from the centre point to the first ring.
+        const [bx, by, bz] = ringPoint(1, i);
+        const [cx, cy, cz] = ringPoint(1, i + 1);
+        pushTri(0, discY + domeH, 0, bx, by, bz, cx, cy, cz, cc, 1);
+      } else {
+        // Quad band between two rings, split into two triangles.
+        const [ax, ay, az] = ringPoint(ring, i);
+        const [bx, by, bz] = ringPoint(ring, i + 1);
+        const [dx, dy, dz] = ringPoint(ring + 1, i);
+        const [ex, ey, ez] = ringPoint(ring + 1, i + 1);
+        pushTri(ax, ay, az, dx, dy, dz, ex, ey, ez, cc, 1);
+        pushTri(ax, ay, az, ex, ey, ez, bx, by, bz, cc, 1);
+      }
+    }
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -350,20 +371,41 @@ function makeDetachedCenterGeometry(form) {
   const colors = [];
   const indices = [];
   const centerColor = new THREE.Color(discColor);
-  const segments = 9;
-  for (let i = 0; i < segments; i += 1) {
-    const a0 = (i / segments) * Math.PI * 2;
-    const a1 = ((i + 1) / segments) * Math.PI * 2;
+  // Mirror makeBaseGeometry's domed centre so a detached centre keeps the same
+  // smooth, rounded look it had while attached.
+  const segments = 28;
+  const rings = 3;
+  const domeH = 0.04;
+  const pushTri = (ax, ay, az, bx, by, bz, cx, cy, cz) => {
     const base = positions.length / 3;
-    positions.push(
-      0, 0.04, 0,
-      Math.cos(a0) * disc, 0, Math.sin(a0) * disc,
-      Math.cos(a1) * disc, 0, Math.sin(a1) * disc,
-    );
+    positions.push(ax, ay, az, bx, by, bz, cx, cy, cz);
     for (let vertex = 0; vertex < 3; vertex += 1) {
       colors.push(centerColor.r, centerColor.g, centerColor.b);
     }
     indices.push(base, base + 1, base + 2);
+  };
+  const ringPoint = (ring, i) => {
+    const t = ring / rings;
+    const r = Math.sin((t * Math.PI) / 2) * disc;
+    const y = Math.cos((t * Math.PI) / 2) * domeH;
+    const a = (i / segments) * Math.PI * 2;
+    return [Math.cos(a) * r, y, Math.sin(a) * r];
+  };
+  for (let ring = 0; ring < rings; ring += 1) {
+    for (let i = 0; i < segments; i += 1) {
+      if (ring === 0) {
+        const [bx, by, bz] = ringPoint(1, i);
+        const [cx, cy, cz] = ringPoint(1, i + 1);
+        pushTri(0, domeH, 0, bx, by, bz, cx, cy, cz);
+      } else {
+        const [ax, ay, az] = ringPoint(ring, i);
+        const [bx, by, bz] = ringPoint(ring, i + 1);
+        const [dx, dy, dz] = ringPoint(ring + 1, i);
+        const [ex, ey, ez] = ringPoint(ring + 1, i + 1);
+        pushTri(ax, ay, az, dx, dy, dz, ex, ey, ez);
+        pushTri(ax, ay, az, ex, ey, ez, bx, by, bz);
+      }
+    }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setIndex(indices);
@@ -632,6 +674,9 @@ export function createFlowerPatch({
         const baseData = instancedBufferAttribute(discGrowthAttr);
         const part = attribute('basePart', 'float');
         const radialScale = mix(1, baseData.x, part);
+        // Y is left unscaled: the disc sits at an absolute head height, so
+        // scaling its Y would slide it down the stem instead of resizing it.
+        // The shallow dome (domeH) reads fine; radial scale carries the size.
         const windRotation = makeWindRotation(tintNode.w);
         const rotation = attribute('swayData', 'vec4').w;
         const grown = vec3(
@@ -961,7 +1006,12 @@ export function createFlowerPatch({
     const flower = b.flower;
     const growth = flowerGrowth(flower);
     const j = b.slot * 4;
-    form.discGrowth[j] = THREE.MathUtils.lerp(0.18, 1, flowerOpening(flower)) * b.discFade;
+    // The centre disc draws down with the petals as the flower wilts so it
+    // doesn't sit full-size while the bloom shrinks around it. This rides the
+    // disc-only radial channel (basePart == 1) — NOT the j+1 head scale, which
+    // also drives the stem and would otherwise pull the whole head downward.
+    const wiltDisc = THREE.MathUtils.lerp(1, 0.4, flower.wilt);
+    form.discGrowth[j] = THREE.MathUtils.lerp(0.18, 1, flowerOpening(flower)) * b.discFade * wiltDisc;
     form.discGrowth[j + 1] = flower.scale * growth * b.fade;
     const droop = (b.deathProgress || 0) * 0.42;
     form.discGrowth[j + 2] = Math.cos(flower.tiltDir) * (flower.tilt + droop);
@@ -1393,7 +1443,12 @@ export function createFlowerPatch({
   function detachCenter(form, flower) {
     if (form.centers.length >= form.centerCap) return;
     computeSwayQuaternion(flower);
+    // headScale positions the centre at the true head height. The wilt-shrink
+    // (matching the attached disc) is applied ONLY to the rendered size below —
+    // folding it into the transform here would scale the HEAD_Y offset too and
+    // spawn the centre partway down the stem.
     const headScale = flower.scale * flowerGrowth(flower);
+    const wiltDisc = THREE.MathUtils.lerp(1, 0.4, flower.wilt);
     pScratch.set(flower.x, yOffset + flower.y, flower.z);
     sScratch.set(headScale, headScale, headScale);
     worldMat.compose(pScratch, qSwayScratch, sScratch);
@@ -1405,7 +1460,7 @@ export function createFlowerPatch({
       slot: form.centers.length,
       x: pScratch.x, y: pScratch.y, z: pScratch.z,
       rx: eScratch.x, ry: eScratch.y, rz: eScratch.z,
-      scale: headScale,
+      scale: headScale * wiltDisc,
       r: tmpColor.r, g: tmpColor.g, b: tmpColor.b,
       vx: (rand() - 0.5) * 0.04,
       vy: 0.18 + rand() * 0.12,

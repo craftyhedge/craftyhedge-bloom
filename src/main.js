@@ -927,7 +927,7 @@ function updateStats() {
 
 async function start() {
   try {
-    setLoaderMessage('Starting the renderer…');
+    setLoaderMessage('Planting…');
     await renderer.init();
   } catch (error) {
     showUnsupported('WebGPU could not start in this browser.');
@@ -938,7 +938,7 @@ async function start() {
   resize();
 
   try {
-    setLoaderMessage('Growing the hedge…');
+    setLoaderMessage('Planting…');
     // The rock text + moss culling only exist once the font has loaded; wait for
     // that before building anything downstream of the glyph masks.
     await fontReady;
@@ -950,7 +950,7 @@ async function start() {
     // the patch up front and then compileAsync()-ing the whole scene forces every
     // pipeline (moss, rock, flowers, bloom) to compile during the loading screen,
     // so the first real frame is already warm and flowers spawn instantly on hover.
-    setLoaderMessage('Planting the flowers…');
+    setLoaderMessage('Trimming…');
     await createFlowers();
     await renderer.compileAsync(scene, camera);
 
