@@ -1621,9 +1621,13 @@ export function createFlowerPatch({
         : null;
       const parentAngle = rand() * Math.PI * 2;
       const childRadius = CROWN_RADIUS * nominalScale;
+      // The offset must clear the parent's collision shell, otherwise the anchored
+      // spot is already inside the parent and every probe around it collides. The
+      // pack ratio caps near ~0.82, so keep the minimum separation above that —
+      // small blooms used to anchor at 0.52, well inside the parent, and starved.
       const parentDistance = parent
         ? (parent.radius + childRadius)
-          * THREE.MathUtils.lerp(0.72 + rand() * 0.42, 0.52 + rand() * 0.24, smallness)
+          * THREE.MathUtils.lerp(1.05 + rand() * 0.4, 0.92 + rand() * 0.26, smallness)
         : 0;
       const parentCenterX = parent ? parent.x + Math.cos(parentAngle) * parentDistance : spawnCenterX;
       const parentCenterZ = parent ? parent.z + Math.sin(parentAngle) * parentDistance : spawnCenterZ;
@@ -1639,12 +1643,32 @@ export function createFlowerPatch({
         ? clumpSpread * THREE.MathUtils.lerp(0.42, 0.24, smallness)
         : clumpSpread * THREE.MathUtils.lerp(1, 0.78, smallness);
 
-      for (let attempt = 0; attempt < placementAttempts; attempt += 1) {
-        const closeIn = 1 - attempt / placementAttempts;
-        const r = (rand() * rand()) * candidateSpread * closeIn;
-        const a = rand() * Math.PI * 2;
-        const fx = candidateCenterX + Math.cos(a) * r;
-        const fz = candidateCenterZ + Math.sin(a) * r;
+      // Parent-anchored probes cluster in a tiny neighbourhood beside an existing
+      // bloom; once that spot is taken every attempt collides and the try plants
+      // nothing. The extra attempts fall back to the open spawn centre under the
+      // cursor so a worked area keeps filling instead of starving — the failure
+      // that left early/low-density patches looking dead.
+      const fallbackAttempts = parent ? placementAttempts : 0;
+      const totalAttempts = placementAttempts + fallbackAttempts;
+      for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+        const onFallback = attempt >= placementAttempts;
+        const localAttempt = onFallback ? attempt - placementAttempts : attempt;
+        const localCount = onFallback ? fallbackAttempts : placementAttempts;
+        const closeIn = 1 - localAttempt / localCount;
+        const activeCenterX = onFallback ? spawnCenterX : candidateCenterX;
+        const activeCenterZ = onFallback ? spawnCenterZ : candidateCenterZ;
+        const activeSpread = onFallback
+          ? clumpSpread * THREE.MathUtils.lerp(1, 0.78, smallness)
+          : candidateSpread;
+        const r = (rand() * rand()) * activeSpread * closeIn;
+        // Around a parent, bias the probe into the outward half-disc (away from the
+        // parent) so jitter adds clearance instead of steering back into the bloom
+        // we are trying to sit beside. The open-ground passes stay fully radial.
+        const a = parent && !onFallback
+          ? parentAngle + (rand() - 0.5) * Math.PI
+          : rand() * Math.PI * 2;
+        const fx = activeCenterX + Math.cos(a) * r;
+        const fz = activeCenterZ + Math.sin(a) * r;
         const growthScale = colony.vigor * edgeScale * (0.92 + rand() * 0.16);
         const basePack = THREE.MathUtils.lerp(0.74, 0.5, centerStrength) + rand() * 0.08;
         const pack = THREE.MathUtils.lerp(basePack, basePack * 0.78, smallness);
