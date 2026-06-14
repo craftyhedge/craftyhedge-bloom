@@ -6,9 +6,7 @@
 
 Performance may vary.
 
-A bit of fun. This started as an excuse to play with **WebGPU** and Three.js, and to chase
-one idea in particular: what does it feel like to *grow* flowers with your cursor rather
-than just place them?
+A bit of fun. This started as an excuse to play with **WebGPU** and Three.js.
 
 Sweep your pointer across the hedge and blooms break ground in your wake. Come back to a
 patch you've already grown and it cultivates over repeated visits — denser, taller, more
