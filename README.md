@@ -1,4 +1,4 @@
-# Craftyhedge
+# Crafty Hedge Bloom
 
 ![CRAFTY HEDGE rendered as stone lettering on moss, ringed with colourful blooms](docs/preview.webp)
 
@@ -34,3 +34,4 @@ You can also check your own browser at [webgpureport.org](https://webgpureport.o
 ## Still to do
 
 - Optimization
+- AI slop clean up
