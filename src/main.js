@@ -192,6 +192,27 @@ const isInVisibleHedge = (x, z) => {
 };
 
 fitCameraToText(INITIAL_STAGE_ASPECT);
+// The base plane spans every supported aspect ratio, but generating tuft
+// instances for that entire union wastes most startup work on off-screen moss.
+// Populate only the current camera footprint with enough overscan to absorb
+// normal viewport changes without exposing the base beneath it.
+const MOSS_FRUSTUM_OVERSCAN = 1.25;
+const initialMossFootprint = [
+  getGroundCorner(-MOSS_FRUSTUM_OVERSCAN, -MOSS_FRUSTUM_OVERSCAN),
+  getGroundCorner(MOSS_FRUSTUM_OVERSCAN, -MOSS_FRUSTUM_OVERSCAN),
+  getGroundCorner(MOSS_FRUSTUM_OVERSCAN, MOSS_FRUSTUM_OVERSCAN),
+  getGroundCorner(-MOSS_FRUSTUM_OVERSCAN, MOSS_FRUSTUM_OVERSCAN),
+];
+const MOSS_MIN_X = Math.min(...initialMossFootprint.map((point) => point.x));
+const MOSS_MAX_X = Math.max(...initialMossFootprint.map((point) => point.x));
+const MOSS_NEAR_Z = Math.max(...initialMossFootprint.map((point) => point.z));
+const MOSS_FAR_Z = Math.min(...initialMossFootprint.map((point) => point.z));
+const MOSS_WIDTH = MOSS_MAX_X - MOSS_MIN_X;
+const MOSS_DEPTH = MOSS_NEAR_Z - MOSS_FAR_Z;
+const MOSS_CENTER_X = (MOSS_MIN_X + MOSS_MAX_X) / 2;
+const MOSS_CENTER_Z = (MOSS_NEAR_Z + MOSS_FAR_Z) / 2;
+const isInInitialMoss = (x, z) => isInsideFootprint(x, z, initialMossFootprint);
+
 const hedgeBaseGeometry = new THREE.BufferGeometry();
 hedgeBaseGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
   HEDGE_MIN_X, GROUND_Y, HEDGE_NEAR_Z,
@@ -250,11 +271,11 @@ let isUnderRockTest = null;
 let nearestRockEdgeTest = null;
 
 const mossTop = createTuftBlanket({
-  width: HEDGE_WIDTH,
-  depth: HEDGE_DEPTH,
-  centerX: HEDGE_CENTER_X,
-  centerZ: HEDGE_CENTER_Z,
-  visibilityTest: isInVisibleHedge,
+  width: MOSS_WIDTH,
+  depth: MOSS_DEPTH,
+  centerX: MOSS_CENTER_X,
+  centerZ: MOSS_CENTER_Z,
+  visibilityTest: isInInitialMoss,
   spacing: 0.18,
   seed: 184,
   heightRange: [0.26, 0.74],
@@ -296,7 +317,7 @@ async function createFlowers() {
     lifespan: [11, 19],
     yOffset: GROUND_Y,
     canGrow: (x, z, crownRadius = 0) => {
-      if (!isInVisibleHedge(x, z)) return false;
+      if (!isInInitialMoss(x, z)) return false;
       if (isUnderRockTest && isUnderRockTest(x, z)) return false;
       if (!nearestRockEdgeTest) return true;
 
@@ -897,7 +918,7 @@ function spawnFlowerAtPointer(event) {
   const ground = getGroundCorner(ndcX, ndcY);
   const { x, z } = ground;
 
-  if (!isInVisibleHedge(x, z)) {
+  if (!isInInitialMoss(x, z)) {
     leaveFlowerArea();
     return;
   }
