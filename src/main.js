@@ -508,6 +508,95 @@ function createGlyphMask(font, word, centerX, centerZ, wordZ) {
   return { contains, nearestEdge };
 }
 
+function createGlyphDistanceField(masks, bounds, spacing = 0.04) {
+  const width = Math.ceil((bounds.maxX - bounds.minX) / spacing) + 1;
+  const depth = Math.ceil((bounds.maxZ - bounds.minZ) / spacing) + 1;
+  const distance = new Float32Array(width * depth);
+  const directionX = new Float32Array(width * depth);
+  const directionZ = new Float32Array(width * depth);
+
+  const exactSample = (x, z) => {
+    let nearest = null;
+    let inside = false;
+
+    for (const mask of masks) {
+      if (mask.contains(x, z)) inside = true;
+      const edge = mask.nearestEdge(x, z);
+      if (!nearest || edge.distance < nearest.distance) nearest = edge;
+    }
+
+    return {
+      ...nearest,
+      signedDistance: inside ? -nearest.distance : nearest.distance,
+    };
+  };
+
+  for (let zIndex = 0; zIndex < depth; zIndex += 1) {
+    const z = bounds.minZ + zIndex * spacing;
+    for (let xIndex = 0; xIndex < width; xIndex += 1) {
+      const x = bounds.minX + xIndex * spacing;
+      const sample = exactSample(x, z);
+      const index = zIndex * width + xIndex;
+      distance[index] = sample.signedDistance;
+      directionX[index] = sample.x;
+      directionZ[index] = sample.z;
+    }
+  }
+
+  const interpolate = (array, x0, z0, x1, z1, tx, tz) => {
+    const a = THREE.MathUtils.lerp(array[z0 * width + x0], array[z0 * width + x1], tx);
+    const b = THREE.MathUtils.lerp(array[z1 * width + x0], array[z1 * width + x1], tx);
+    return THREE.MathUtils.lerp(a, b, tz);
+  };
+
+  function sample(x, z) {
+    const gridX = (x - bounds.minX) / spacing;
+    const gridZ = (z - bounds.minZ) / spacing;
+
+    // All consumers only care about precise distances within the text band.
+    // Outside the precomputed bounds, a conservative distance is enough to
+    // reject culling/avoidance work without another contour scan.
+    if (gridX < 0 || gridZ < 0 || gridX > width - 1 || gridZ > depth - 1) {
+      const nearestX = THREE.MathUtils.clamp(x, bounds.minX, bounds.maxX);
+      const nearestZ = THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZ);
+      const deltaX = x - nearestX;
+      const deltaZ = z - nearestZ;
+      const outsideDistance = Math.hypot(deltaX, deltaZ);
+      const inverseDistance = outsideDistance > 0.0001 ? 1 / outsideDistance : 0;
+      return {
+        x: deltaX * inverseDistance,
+        z: deltaZ * inverseDistance,
+        distance: (bounds.fallbackDistance || spacing) + outsideDistance,
+        inside: false,
+      };
+    }
+
+    const x0 = Math.min(width - 1, Math.floor(gridX));
+    const z0 = Math.min(depth - 1, Math.floor(gridZ));
+    const x1 = Math.min(width - 1, x0 + 1);
+    const z1 = Math.min(depth - 1, z0 + 1);
+    const tx = gridX - x0;
+    const tz = gridZ - z0;
+    const signedDistance = interpolate(distance, x0, z0, x1, z1, tx, tz);
+    let xDirection = interpolate(directionX, x0, z0, x1, z1, tx, tz);
+    let zDirection = interpolate(directionZ, x0, z0, x1, z1, tx, tz);
+    const directionLength = Math.hypot(xDirection, zDirection);
+    if (directionLength > 0.0001) {
+      xDirection /= directionLength;
+      zDirection /= directionLength;
+    }
+
+    return {
+      x: xDirection,
+      z: zDirection,
+      distance: Math.abs(signedDistance),
+      inside: signedDistance < 0,
+    };
+  }
+
+  return { sample };
+}
+
 const fontLoader = new FontLoader();
 let resolveFontReady;
 let rejectFontReady;
@@ -596,18 +685,33 @@ fontLoader.load(
       hedgeMesh.userData.footprintCenter.z,
       TEXT_CENTER_Z + TEXT_LINE_SPACING / 2,
     );
+    const TUFT_CULL_MARGIN = 0.3;
+    const FLOWER_CULL_MARGIN = 0.06;
+    const FILL_CULL_MARGIN = 0.08;
+    const FILL_BAND = 0.9;
+
+    const textBounds = new THREE.Box3();
+    for (const mesh of [craftyMesh, hedgeMesh]) {
+      const box = mesh.geometry.boundingBox.clone();
+      box.translate(signGroup.position).translate(mesh.position);
+      textBounds.union(box);
+    }
+    const fieldPadding = FILL_BAND + 0.12;
+    const rockField = createGlyphDistanceField([craftyMask, hedgeMask], {
+      minX: textBounds.min.x - fieldPadding,
+      maxX: textBounds.max.x + fieldPadding,
+      minZ: textBounds.min.z - fieldPadding,
+      maxZ: textBounds.max.z + fieldPadding,
+      fallbackDistance: fieldPadding,
+    });
+
     // Cull tufts under the letters AND any rooted within a blade-reach of the
     // glyph edge: a tuft is ~0.5 units wide and leans in the wind, so one rooted
     // just outside (or just inside near a wall) still fans its blades up over the
     // now-taller letter sides. Removing inside-or-near-edge clears those.
-    const TUFT_CULL_MARGIN = 0.3;
     const isUnderRock = (x, z) => {
-      if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return true;
-      const nearest = Math.min(
-        craftyMask.nearestEdge(x, z).distance,
-        hedgeMask.nearestEdge(x, z).distance,
-      );
-      return nearest < TUFT_CULL_MARGIN;
+      const edge = rockField.sample(x, z);
+      return edge.inside || edge.distance < TUFT_CULL_MARGIN;
     };
 
     // Flowers are short, so they don't need the tuft's wide keep-out — only the
@@ -615,14 +719,9 @@ fontLoader.load(
     // sealed the inner letter gaps (the A/R/O counters, slots between strokes):
     // 0.3 from each facing wall closed any gap under ~0.6 wide. A tiny margin
     // lets blooms fill those holes reliably while still keeping them off the rock.
-    const FLOWER_CULL_MARGIN = 0.06;
     const isUnderRockForFlowers = (x, z) => {
-      if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return true;
-      const nearest = Math.min(
-        craftyMask.nearestEdge(x, z).distance,
-        hedgeMask.nearestEdge(x, z).distance,
-      );
-      return nearest < FLOWER_CULL_MARGIN;
+      const edge = rockField.sample(x, z);
+      return edge.inside || edge.distance < FLOWER_CULL_MARGIN;
     };
 
     isUnderRockTest = isUnderRockForFlowers;
@@ -633,25 +732,12 @@ fontLoader.load(
     // blades, so they can crowd much closer (FILL_CULL_MARGIN) than the big tufts
     // without poking over the letter walls. Restricted to a band near the edges
     // (FILL_BAND) so this stays a cheap near-text layer, not a whole-field pass.
-    const FILL_CULL_MARGIN = 0.08;
-    const FILL_BAND = 0.9;
-    const nearestRockEdge = (x, z) => Math.min(
-      craftyMask.nearestEdge(x, z).distance,
-      hedgeMask.nearestEdge(x, z).distance,
-    );
-
     // World-space XZ bounds of the whole sign, expanded by FILL_BAND. The fill
     // band only ever wants cells within FILL_BAND of a glyph edge, so any cell
     // outside this box is guaranteed too far — and can be rejected with four
     // comparisons instead of two full glyph-edge polygon scans. Without this gate
     // the fill build paid a ~per-cell scan across the entire hedge footprint (the
     // dense 0.1 grid is hundreds of thousands of cells), which dominated startup.
-    const textBounds = new THREE.Box3();
-    for (const mesh of [craftyMesh, hedgeMesh]) {
-      const box = mesh.geometry.boundingBox.clone();
-      box.translate(signGroup.position).translate(mesh.position);
-      textBounds.union(box);
-    }
     const FILL_BOUND_MIN_X = textBounds.min.x - FILL_BAND;
     const FILL_BOUND_MAX_X = textBounds.max.x + FILL_BAND;
     const FILL_BOUND_MIN_Z = textBounds.min.z - FILL_BAND;
@@ -660,11 +746,7 @@ fontLoader.load(
       x >= FILL_BOUND_MIN_X && x <= FILL_BOUND_MAX_X
       && z >= FILL_BOUND_MIN_Z && z <= FILL_BOUND_MAX_Z
     );
-    nearestRockEdgeTest = (x, z) => {
-      const craftyEdge = craftyMask.nearestEdge(x, z);
-      const hedgeEdge = hedgeMask.nearestEdge(x, z);
-      return craftyEdge.distance < hedgeEdge.distance ? craftyEdge : hedgeEdge;
-    };
+    nearestRockEdgeTest = (x, z) => rockField.sample(x, z);
     fillTop = createTuftBlanket({
       width: HEDGE_WIDTH,
       depth: HEDGE_DEPTH,
@@ -675,9 +757,8 @@ fontLoader.load(
         // so the box test culls them before the expensive glyph-edge scan runs.
         if (!isNearText(x, z)) return false;
         if (!isInVisibleHedge(x, z)) return false;
-        if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return false;
-        const edge = nearestRockEdge(x, z);
-        return edge >= FILL_CULL_MARGIN && edge <= FILL_BAND;
+        const edge = rockField.sample(x, z);
+        return !edge.inside && edge.distance >= FILL_CULL_MARGIN && edge.distance <= FILL_BAND;
       },
       spacing: 0.1,
       seed: 521,
@@ -699,9 +780,7 @@ fontLoader.load(
     fillTuftCount = fillTop.mesh.count;
 
     const applyWindAvoidance = (blanket) => blanket.setWindAvoidance((x, z) => {
-      const craftyEdge = craftyMask.nearestEdge(x, z);
-      const hedgeEdge = hedgeMask.nearestEdge(x, z);
-      const edge = craftyEdge.distance < hedgeEdge.distance ? craftyEdge : hedgeEdge;
+      const edge = rockField.sample(x, z);
 
       return {
         x: edge.x,
