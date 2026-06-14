@@ -455,6 +455,15 @@ export function createFlowerPatch({
   const zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
   const WIND = windDirection.clone().normalize();
 
+  function initializeZeroScaleMatrices(mesh) {
+    const matrices = mesh.instanceMatrix.array;
+    // InstancedMesh starts every slot as identity. Clear the backing array in
+    // native code, then restore homogeneous m44 for each valid zero-scale matrix.
+    matrices.fill(0);
+    for (let offset = 15; offset < matrices.length; offset += 16) matrices[offset] = 1;
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+
   // --- GPU head sway --------------------------------------------------------
   // Wind is evaluated once per vertex on the GPU. Petals rebuild their complete
   // head hierarchy there; bases keep the simpler height-weighted bend.
@@ -771,8 +780,7 @@ export function createFlowerPatch({
     }
     const mesh = new THREE.InstancedMesh(geo, material, count);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    for (let i = 0; i < count; i += 1) mesh.setMatrixAt(i, zeroMat);
-    mesh.instanceMatrix.needsUpdate = true;
+    initializeZeroScaleMatrices(mesh);
     mesh.count = count;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -795,8 +803,8 @@ export function createFlowerPatch({
     roughness: 0.86,
   });
   const centerMesh = new THREE.InstancedMesh(centerGeo, centerMaterial, centerCap);
-  for (let i = 0; i < centerCap; i += 1) centerMesh.setMatrixAt(i, zeroMat);
   centerMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  initializeZeroScaleMatrices(centerMesh);
   centerMesh.count = centerCap;
   centerMesh.castShadow = true;
   centerMesh.receiveShadow = true;

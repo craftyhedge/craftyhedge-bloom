@@ -9,6 +9,44 @@ import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
 import { createDappleNode } from './dapple.js';
 import fontUrl from 'three/examples/fonts/helvetiker_bold.typeface.json?url';
 
+const startupStartedAt = performance.now();
+const startupTimings = [];
+
+function recordStartupTiming(phase, startedAt, type = 'work') {
+  startupTimings.push({
+    phase,
+    type,
+    ms: Number((performance.now() - startedAt).toFixed(1)),
+  });
+}
+
+async function timeStartupAsync(phase, operation, type = 'work') {
+  const startedAt = performance.now();
+  try {
+    return await operation();
+  } finally {
+    recordStartupTiming(phase, startedAt, type);
+  }
+}
+
+function reportStartupTimings() {
+  const revealedAt = performance.now();
+  const rows = [
+    { phase: 'page start to main evaluation', type: 'gate', ms: Number(startupStartedAt.toFixed(1)) },
+    ...startupTimings,
+    {
+      phase: 'MAIN EVALUATION TO REVEAL',
+      type: 'total',
+      ms: Number((revealedAt - startupStartedAt).toFixed(1)),
+    },
+    { phase: 'PAGE START TO REVEAL', type: 'total', ms: Number(revealedAt.toFixed(1)) },
+  ];
+  console.group('[craftyhedge] startup profile');
+  console.table(rows);
+  console.log('Gate timings include work performed while that gate was waiting.');
+  console.groupEnd();
+}
+
 const canvas = document.querySelector('#scene');
 const sceneStage = document.querySelector('[data-scene-stage]');
 const fallback = document.querySelector('[data-webgpu-fallback]');
@@ -270,6 +308,7 @@ let isUnderRockTest = null;
 // Nearest glyph boundary and outward direction, used by the text-edge flowers.
 let nearestRockEdgeTest = null;
 
+let startupPhaseStartedAt = performance.now();
 const mossTop = createTuftBlanket({
   width: MOSS_WIDTH,
   depth: MOSS_DEPTH,
@@ -295,6 +334,9 @@ const mossTop = createTuftBlanket({
   roughness: 1,
   dapple: tuftDappleConfig,
 });
+recordStartupTiming('main moss construction', startupPhaseStartedAt);
+
+startupPhaseStartedAt = performance.now();
 const growthShoots = createGrowthShootField({
   capacity: 2200,
   seed: 947,
@@ -303,13 +345,18 @@ const growthShoots = createGrowthShootField({
   ...hedgeWind,
   dapple: tuftDappleConfig,
 });
+recordStartupTiming('growth shoot construction', startupPhaseStartedAt);
 
 scene.add(hedgeBase, mossTop.mesh, growthShoots.mesh);
 
 let flowerPatch = null;
 
 async function createFlowers() {
+  let flowerPhaseStartedAt = performance.now();
   const { createFlowerPatch } = await import('./flowers.js');
+  recordStartupTiming('flower module import', flowerPhaseStartedAt);
+
+  flowerPhaseStartedAt = performance.now();
   flowerPatch = createFlowerPatch({
     // Longer-lived generations overlap more heavily, so reserve enough slots per
     // species that an established colony does not prevent fresh blooms spawning.
@@ -347,6 +394,7 @@ async function createFlowers() {
     dapple: { ...dappleConfig, clampMax: 1, project: false },
     wind: hedgeWind,
   });
+  recordStartupTiming('flower construction', flowerPhaseStartedAt);
   scene.add(flowerPatch.object);
 }
 
@@ -574,9 +622,6 @@ function createGlyphDistanceField(masks, bounds, spacing = 0.04) {
     const gridX = (x - bounds.minX) / spacing;
     const gridZ = (z - bounds.minZ) / spacing;
 
-    // All consumers only care about precise distances within the text band.
-    // Outside the precomputed bounds, a conservative distance is enough to
-    // reject culling/avoidance work without another contour scan.
     if (gridX < 0 || gridZ < 0 || gridX > width - 1 || gridZ > depth - 1) {
       const nearestX = THREE.MathUtils.clamp(x, bounds.minX, bounds.maxX);
       const nearestZ = THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZ);
@@ -619,15 +664,16 @@ function createGlyphDistanceField(masks, bounds, spacing = 0.04) {
 }
 
 const fontLoader = new FontLoader();
+const fontRequestStartedAt = performance.now();
 let resolveFontReady;
 let rejectFontReady;
 const fontReady = new Promise((resolve, reject) => {
   resolveFontReady = resolve;
   rejectFontReady = reject;
 });
-fontLoader.load(
-  fontUrl,
-  (font) => {
+async function buildFontScene(font) {
+    recordStartupTiming('font fetch and parse', fontRequestStartedAt);
+    const fontSceneStartedAt = performance.now();
     const extrusionDepth = TEXT_SIZE * 0.14;
     const bevelThickness = TEXT_SIZE * 0.036;
 
@@ -668,8 +714,10 @@ fontLoader.load(
     // signGroup treats the two words as one flat piece.
     const signGroup = new THREE.Group();
 
+    let fontPhaseStartedAt = performance.now();
     const craftyMesh = createRockLetter('CRAFTY');
     const hedgeMesh = createRockLetter('HEDGE');
+    recordStartupTiming('letter geometry construction', fontPhaseStartedAt);
 
     // Space the lines along Z (the direction the letter "up" maps to after the geo rotateX).
     // Negative Z is more distant (smaller z = further from camera at +8.1).
@@ -692,6 +740,7 @@ fontLoader.load(
 
     textGroup.add(signGroup);
 
+    fontPhaseStartedAt = performance.now();
     const craftyMask = createGlyphMask(
       font,
       'CRAFTY',
@@ -706,6 +755,7 @@ fontLoader.load(
       hedgeMesh.userData.footprintCenter.z,
       TEXT_CENTER_Z + TEXT_LINE_SPACING / 2,
     );
+    recordStartupTiming('letter mask construction', fontPhaseStartedAt);
     const TUFT_CULL_MARGIN = 0.3;
     const FLOWER_CULL_MARGIN = 0.06;
     const FILL_CULL_MARGIN = 0.08;
@@ -718,6 +768,7 @@ fontLoader.load(
       textBounds.union(box);
     }
     const fieldPadding = FILL_BAND + 0.12;
+    fontPhaseStartedAt = performance.now();
     const rockField = createGlyphDistanceField([craftyMask, hedgeMask], {
       minX: textBounds.min.x - fieldPadding,
       maxX: textBounds.max.x + fieldPadding,
@@ -725,6 +776,7 @@ fontLoader.load(
       maxZ: textBounds.max.z + fieldPadding,
       fallbackDistance: fieldPadding,
     });
+    recordStartupTiming('letter distance field', fontPhaseStartedAt);
 
     // Cull tufts under the letters AND any rooted within a blade-reach of the
     // glyph edge: a tuft is ~0.5 units wide and leans in the wind, so one rooted
@@ -746,7 +798,9 @@ fontLoader.load(
     };
 
     isUnderRockTest = isUnderRockForFlowers;
+    fontPhaseStartedAt = performance.now();
     mossTop.removeWhere(isUnderRock);
+    recordStartupTiming('moss letter cutout', fontPhaseStartedAt);
 
     // Fine fill tufts that hug the letters: half-size, denser-spaced moss that
     // grows into the bare halo the big-tuft cull leaves around the text. Short
@@ -768,6 +822,7 @@ fontLoader.load(
       && z >= FILL_BOUND_MIN_Z && z <= FILL_BOUND_MAX_Z
     );
     nearestRockEdgeTest = (x, z) => rockField.sample(x, z);
+    fontPhaseStartedAt = performance.now();
     fillTop = createTuftBlanket({
       width: HEDGE_WIDTH,
       depth: HEDGE_DEPTH,
@@ -797,6 +852,7 @@ fontLoader.load(
       roughness: 1,
       dapple: tuftDappleConfig,
     });
+    recordStartupTiming('letter fill moss construction', fontPhaseStartedAt);
     scene.add(fillTop.mesh);
     fillTuftCount = fillTop.mesh.count;
 
@@ -809,10 +865,19 @@ fontLoader.load(
         influence: 1 - THREE.MathUtils.smoothstep(edge.distance, 0.08, 0.75),
       };
     });
+    fontPhaseStartedAt = performance.now();
     applyWindAvoidance(mossTop);
     applyWindAvoidance(fillTop);
+    recordStartupTiming('wind avoidance assignment', fontPhaseStartedAt);
     updateStats();
+    recordStartupTiming('font-dependent scene work', fontSceneStartedAt, 'gate');
     resolveFontReady();
+}
+
+fontLoader.load(
+  fontUrl,
+  (font) => {
+    buildFontScene(font).catch(rejectFontReady);
   },
   undefined,
   (error) => rejectFontReady(error),
@@ -1000,6 +1065,7 @@ canvas.addEventListener('pointercancel', leaveFlowerArea);
 // Bloom post-processing: scene → threshold bloom added back over the original.
 // Only the bright emissive flower blooms clear the threshold, so they throw a
 // neon halo while the moss/rock stay clean. strength/radius/threshold are the dials.
+startupPhaseStartedAt = performance.now();
 const postProcessing = new THREE.PostProcessing(renderer);
 const scenePass = pass(scene, camera);
 const sceneColor = scenePass.getTextureNode('output');
@@ -1008,6 +1074,7 @@ const sceneColor = scenePass.getTextureNode('output');
 // not a halo machine — strength, radius, threshold.
 const bloomPass = bloom(sceneColor, 0.1, 0.4, 0.8);
 postProcessing.outputNode = sceneColor.add(bloomPass);
+recordStartupTiming('post-processing setup', startupPhaseStartedAt);
 
 function animate() {
   updateCamera();
@@ -1028,7 +1095,7 @@ function updateStats() {
 async function start() {
   try {
     setLoaderMessage('Planting…');
-    await renderer.init();
+    await timeStartupAsync('WebGPU renderer init', () => renderer.init());
   } catch (error) {
     showUnsupported('WebGPU could not start in this browser.');
     console.error(error);
@@ -1041,21 +1108,24 @@ async function start() {
     setLoaderMessage('Planting…');
     // The rock text + moss culling only exist once the font has loaded; wait for
     // that before building anything downstream of the glyph masks.
-    await fontReady;
+    await timeStartupAsync('font scene readiness', () => fontReady, 'gate');
 
     // Build the flower patch NOW, while the loader is still up, instead of after
     // reveal. The visible stall before flowers appeared wasn't CPU geometry work
-    // (the meshes are tiny) — it was the lazy compilation of the per-species node
+    // (the meshes are tiny) — it was the lazy compilation of the flower node
     // materials, which WebGPU defers until each pipeline is first drawn. Creating
     // the patch up front and then compileAsync()-ing the whole scene forces every
     // pipeline (moss, rock, flowers, bloom) to compile during the loading screen,
     // so the first real frame is already warm and flowers spawn instantly on hover.
     setLoaderMessage('Trimming…');
     await createFlowers();
-    await renderer.compileAsync(scene, camera);
+    await timeStartupAsync(
+      'WebGPU scene compilation',
+      () => renderer.compileAsync(scene, camera),
+    );
 
     setLoaderMessage('Almost ready…');
-    await postProcessing.renderAsync();
+    await timeStartupAsync('first post-processed frame', () => postProcessing.renderAsync());
   } catch (error) {
     showLoaderError('The scene failed to load.');
     console.error(error);
@@ -1063,9 +1133,11 @@ async function start() {
   }
 
   revealScene();
+  reportStartupTimings();
   renderer.setAnimationLoop(animate);
 }
 
 window.addEventListener('resize', resize);
 
+recordStartupTiming('module setup before start()', startupStartedAt, 'gate');
 start();
