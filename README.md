@@ -1,5 +1,7 @@
 # Craftyhedge
 
+![CRAFTY HEDGE rendered as stone lettering on moss, ringed with colourful blooms](docs/preview.webp)
+
 **▶ [Live demo](https://craftyhedge.github.io/craftyhedge-bloom/)**
 
 Performance may vary.
