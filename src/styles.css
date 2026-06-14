@@ -17,6 +17,61 @@
     display: block;
   }
 
+  /* Scene stays hidden behind the loader until the renderer, font and first
+     frame are ready, then fades in once data-ready is set on the canvas. */
+  .scene-canvas {
+    opacity: 0;
+    transition: opacity 600ms ease;
+  }
+
+  .scene-canvas[data-ready] {
+    opacity: 1;
+  }
+
+  .scene-loader {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    background: #10170f;
+    color: #d7ffe6;
+    transition: opacity 500ms ease;
+  }
+
+  .scene-loader[hidden] {
+    display: none;
+  }
+
+  .scene-loader.is-hiding {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .scene-loader__spinner {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 9999px;
+    border: 3px solid rgba(215, 255, 230, 0.2);
+    border-top-color: #7fdca0;
+    animation: scene-loader-spin 900ms linear infinite;
+  }
+
+  .scene-loader__message {
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+  }
+
+  @keyframes scene-loader-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .scene-stage {
     position: relative;
     width: 100%;

@@ -107,6 +107,45 @@ function makeLeafClumpGeometry() {
   return geometry;
 }
 
+function makeFreshShootGeometry() {
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const leafColors = [
+    new THREE.Color(0x275529),
+    new THREE.Color(0x477c3c),
+    new THREE.Color(0x70a052),
+  ];
+
+  for (let i = 0; i < 11; i += 1) {
+    const angle = (i / 11) * Math.PI * 2 + ((i * 7) % 5 - 2) * 0.09;
+    const right = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+    const forward = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
+    const root = forward.clone().multiplyScalar(0.018 + (i % 4) * 0.012).setY(0.01 + i * 0.004);
+    pushCurvedLeaf({
+      positions,
+      colors,
+      indices,
+      palette: leafColors,
+      root,
+      right,
+      forward,
+      height: 0.44 + ((i * 5) % 7) * 0.05,
+      length: 0.16 + ((i * 3) % 5) * 0.04,
+      width: 0.115 + ((i * 2) % 4) * 0.016,
+      arch: 0.035 + ((i * 5) % 6) * 0.022,
+      segments: 6,
+    });
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setIndex(indices);
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function makeMossMatGeometry() {
   const positions = [];
   const colors = [];
@@ -653,6 +692,141 @@ export function createTuftBlanket({
       }
 
       geometry.getAttribute('windAvoidance').needsUpdate = true;
+    },
+  };
+}
+
+export function createGrowthShootField({
+  capacity = 2200,
+  yOffset = 0,
+  seed = 811,
+  lifespan = [11, 19],
+  windScale = 1,
+  windSpeed = 1.55,
+  windTurbulence = 0.3,
+  dapple = null,
+} = {}) {
+  const random = createSeededRandom(seed);
+  const geometry = makeFreshShootGeometry();
+  const material = createWindMaterial({
+    roughness: 1,
+    windScale,
+    windSpeed,
+    windTurbulence,
+    dapple,
+  });
+  const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+  const windData = new Float32Array(capacity * 4);
+  const windPhase = new Float32Array(capacity);
+  const windAvoidance = new Float32Array(capacity * 3);
+  const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+  const color = new THREE.Color();
+  const shoots = new Array(capacity).fill(null);
+  const freeSlots = [];
+  let nextSlot = 0;
+  const active = new Set();
+
+  geometry.setAttribute('windData', new THREE.InstancedBufferAttribute(windData, 4));
+  geometry.setAttribute('windPhase', new THREE.InstancedBufferAttribute(windPhase, 1));
+  geometry.setAttribute('windAvoidance', new THREE.InstancedBufferAttribute(windAvoidance, 3));
+  color.set(0x4f8f45);
+  for (let i = 0; i < capacity; i += 1) {
+    mesh.setMatrixAt(i, zeroMatrix);
+    mesh.setColorAt(i, color);
+  }
+  // Keep the compile-time count above Three's 1000-instance threshold. Setting
+  // count to zero here makes InstanceNode choose its UBO path while still binding
+  // the full capacity-sized matrix array, which exceeds WebGPU's 64 KiB limit.
+  // Zero-scale matrices keep unused and recycled slots invisible while the mesh
+  // remains on the large-instance attribute path.
+  mesh.count = capacity;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  if (mesh.instanceColor) mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+
+  function hasNearby(x, z) {
+    const minDistanceSq = 0.085 * 0.085;
+    for (const shoot of active) {
+      const dx = shoot.x - x;
+      const dz = shoot.z - z;
+      if (dx * dx + dz * dz < minDistanceSq) return true;
+    }
+    return false;
+  }
+
+  return {
+    mesh,
+    add(x, z, sizeScale = 1) {
+      if ((nextSlot >= capacity && freeSlots.length === 0) || hasNearby(x, z)) return false;
+      const index = freeSlots.length > 0 ? freeSlots.pop() : nextSlot++;
+      const localScale = THREE.MathUtils.clamp(sizeScale, 0.01, 1);
+      const shoot = {
+        index,
+        x: x + (random() - 0.5) * 0.05,
+        y: yOffset + 0.035,
+        z: z + (random() - 0.5) * 0.05,
+        targetWidth: (0.56 + random() * 0.16) * localScale,
+        width: 0.01,
+        targetHeight: (0.84 + random() * 0.2) * localScale,
+        height: 0.01,
+        depth: 0.78 + random() * 0.28,
+        rotation: random() * Math.PI * 2,
+        phase: random() * Math.PI * 2,
+        windAngle: 0.62 + random() * 0.66,
+        windStrength: 0.12 + random() * 0.12,
+        age: 0,
+        growDuration: 0.3 + random() * 0.18,
+        holdDuration: lifespan[0] + random() * (lifespan[1] - lifespan[0]),
+        fadeDuration: 0.8 + random() * 0.35,
+      };
+      shoots[index] = shoot;
+      active.add(shoot);
+
+      const windIndex = index * 4;
+      windData[windIndex] = shoot.x;
+      windData[windIndex + 1] = shoot.z;
+      windData[windIndex + 2] = shoot.rotation;
+      windData[windIndex + 3] = shoot.windStrength;
+      windPhase[index] = shoot.phase;
+      color.setHSL(0.31 + random() * 0.025, 0.44 + random() * 0.1, 0.355 + random() * 0.07);
+      mesh.setColorAt(index, color);
+      mesh.setMatrixAt(index, setClumpMatrix(shoot, 0));
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      geometry.getAttribute('windData').needsUpdate = true;
+      geometry.getAttribute('windPhase').needsUpdate = true;
+      return true;
+    },
+    update(dt = 0) {
+      if (active.size === 0) return;
+      for (const shoot of active) {
+        shoot.age += dt;
+        const fadeStart = shoot.growDuration + shoot.holdDuration;
+        const end = fadeStart + shoot.fadeDuration;
+        let scale;
+        if (shoot.age < shoot.growDuration) {
+          const progress = shoot.age / shoot.growDuration;
+          scale = 1 - Math.pow(1 - progress, 3);
+        } else if (shoot.age < fadeStart) {
+          scale = 1;
+        } else {
+          const progress = Math.min(1, (shoot.age - fadeStart) / shoot.fadeDuration);
+          scale = 1 - progress * progress * (3 - 2 * progress);
+        }
+
+        shoot.width = shoot.targetWidth * scale;
+        shoot.height = shoot.targetHeight * scale;
+        if (shoot.age >= end) {
+          mesh.setMatrixAt(shoot.index, zeroMatrix);
+          shoots[shoot.index] = null;
+          freeSlots.push(shoot.index);
+          active.delete(shoot);
+        } else {
+          mesh.setMatrixAt(shoot.index, setClumpMatrix(shoot, 0));
+        }
+      }
+      mesh.instanceMatrix.needsUpdate = true;
     },
   };
 }

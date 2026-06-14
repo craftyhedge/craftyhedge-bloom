@@ -11,7 +11,12 @@
   </head>
   <body class="bg-[#10170f] text-white antialiased">
     <div class="scene-stage" data-scene-stage>
-      <canvas id="scene" class="absolute inset-0 h-full w-full"></canvas>
+      <canvas id="scene" class="absolute inset-0 h-full w-full scene-canvas" data-scene-canvas></canvas>
+
+      <div class="scene-loader" data-scene-loader>
+        <div class="scene-loader__spinner" aria-hidden="true"></div>
+        <p class="scene-loader__message" data-scene-loader-message>Growing the hedge…</p>
+      </div>
 
       <main class="pointer-events-none absolute inset-0">
         <section class="flex h-full items-start justify-end gap-4 p-4 sm:p-6">

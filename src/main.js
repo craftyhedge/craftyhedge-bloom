@@ -1,17 +1,56 @@
 import './styles.css';
 import * as THREE from 'three/webgpu';
-import { createTuftBlanket } from './foliage.js';
+import { createGrowthShootField, createTuftBlanket } from './foliage.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { abs, color, mix, mx_fractal_noise_float, normalWorld, oneMinus, pass, positionWorld, smoothstep } from 'three/tsl';
 import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
 import { createDappleNode } from './dapple.js';
-import { createFlowerPatch } from './flowers.js';
+import fontUrl from 'three/examples/fonts/helvetiker_bold.typeface.json?url';
 
 const canvas = document.querySelector('#scene');
 const sceneStage = document.querySelector('[data-scene-stage]');
 const fallback = document.querySelector('[data-webgpu-fallback]');
+const sceneLoader = document.querySelector('[data-scene-loader]');
+const sceneLoaderMessage = document.querySelector('[data-scene-loader-message]');
+
+function setLoaderMessage(message) {
+  if (sceneLoaderMessage) sceneLoaderMessage.textContent = message;
+}
+
+function showLoaderError(message) {
+  setLoaderMessage(message);
+  if (sceneLoader) sceneLoader.querySelector('.scene-loader__spinner')?.remove();
+}
+
+function revealScene() {
+  canvas.dataset.ready = '';
+  if (!sceneLoader) return;
+  sceneLoader.classList.add('is-hiding');
+  sceneLoader.addEventListener('transitionend', () => {
+    sceneLoader.hidden = true;
+  }, { once: true });
+}
+
+function showUnsupported(message) {
+  if (fallback) {
+    fallback.hidden = false;
+    fallback.textContent = message;
+  }
+  showLoaderError(message);
+}
+
+// WebGPU is required: bail out before touching the renderer if the browser has
+// no `navigator.gpu` at all, so the user sees a clear message instead of a blank
+// canvas or an unhandled construction error.
+if (!navigator.gpu) {
+  showUnsupported(
+    'This experience needs WebGPU, which isn’t available in this browser. '
+    + 'Try the latest Chrome, Edge, or another WebGPU-capable browser.',
+  );
+  throw new Error('[craftyhedge] WebGPU is not supported in this browser.');
+}
 
 const renderer = new THREE.WebGPURenderer({
   antialias: true,
@@ -235,41 +274,77 @@ const mossTop = createTuftBlanket({
   roughness: 1,
   dapple: tuftDappleConfig,
 });
-
-scene.add(hedgeBase, mossTop.mesh);
-
-const flowerPatch = createFlowerPatch({
-  // Longer-lived generations overlap more heavily, so reserve enough slots per
-  // species that an established colony does not prevent fresh blooms spawning.
-  maxFlowers: 1800,
-  lifespan: [11, 19],
+const growthShoots = createGrowthShootField({
+  capacity: 2200,
+  seed: 947,
   yOffset: GROUND_Y,
-  canGrow: (x, z) => isInVisibleHedge(x, z) && !(isUnderRockTest && isUnderRockTest(x, z)),
-  // Keep stems upright beside the rock. Farther out they smoothly regain their
-  // species lean, so no stem can angle through a letter wall.
-  tiltScale: (x, z) => {
-    if (!nearestRockEdgeTest) return 1;
-    return THREE.MathUtils.smoothstep(nearestRockEdgeTest(x, z).distance, 0.24, 0.6);
-  },
-  // Same drifting leaf-shadow as the moss, but capped at 1.0 so it only shades
-  // the blooms into the pools — never lifts the saturated petals back toward the
-  // neon blowout we just dialled out. Sampled by world XZ (flowers sit low).
-  dapple: { ...dappleConfig, clampMax: 1, project: false },
-  wind: hedgeWind,
+  lifespan: [11, 19],
+  ...hedgeWind,
+  dapple: tuftDappleConfig,
 });
-scene.add(flowerPatch.object);
+
+scene.add(hedgeBase, mossTop.mesh, growthShoots.mesh);
+
+let flowerPatch = null;
+
+async function createFlowers() {
+  const { createFlowerPatch } = await import('./flowers.js');
+  flowerPatch = createFlowerPatch({
+    // Longer-lived generations overlap more heavily, so reserve enough slots per
+    // species that an established colony does not prevent fresh blooms spawning.
+    maxFlowers: 1800,
+    lifespan: [11, 19],
+    yOffset: GROUND_Y,
+    canGrow: (x, z, crownRadius = 0) => {
+      if (!isInVisibleHedge(x, z)) return false;
+      if (isUnderRockTest && isUnderRockTest(x, z)) return false;
+      if (!nearestRockEdgeTest) return true;
+
+      // The glyph mask above tests only the stem root. Reserve part of the
+      // rendered crown radius too, otherwise large/later-stage blooms rooted
+      // just outside a stroke can spread their petals across the rock surface.
+      // Cap the margin so small letter counters still remain plantable.
+      const crownClearance = THREE.MathUtils.clamp(crownRadius * 0.32 + 0.035, 0.06, 0.22);
+      return nearestRockEdgeTest(x, z).distance >= crownClearance;
+    },
+    // Near the rock, force stems to lean away from the nearest glyph edge and
+    // suppress most wind bend. Farther out they regain random lean and full wind.
+    tiltScale: (x, z) => {
+      if (!nearestRockEdgeTest) return 1;
+      const edge = nearestRockEdgeTest(x, z);
+      const edgeInfluence = 1 - THREE.MathUtils.smoothstep(edge.distance, 0.18, 0.62);
+      return {
+        scale: THREE.MathUtils.lerp(1, 0.48, edgeInfluence),
+        direction: Math.atan2(-edge.x, edge.z),
+        directionInfluence: edgeInfluence,
+        windScale: THREE.MathUtils.lerp(1, 0.12, edgeInfluence),
+      };
+    },
+    // Same drifting leaf-shadow as the moss, but capped at 1.0 so it only shades
+    // the blooms into the pools — never lifts the saturated petals back toward the
+    // neon blowout we just dialled out. Sampled by world XZ (flowers sit low).
+    dapple: { ...dappleConfig, clampMax: 1, project: false },
+    wind: hedgeWind,
+  });
+  scene.add(flowerPatch.object);
+}
 
 const sun = new THREE.DirectionalLight(0xfff2c4, 4.0);
 sun.position.copy(SUN_POSITION);
 sun.target.position.copy(SUN_TARGET);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
+// Keep the orthographic volume tight so the 2048² map retains enough texel
+// density for crisp foliage and letter shadows. The broader computed footprint
+// spread the map across off-screen hedge and produced blocky, unstable edges.
 sun.shadow.camera.left = -11;
 sun.shadow.camera.right = 11;
 sun.shadow.camera.top = 7;
 sun.shadow.camera.bottom = -7;
 sun.shadow.camera.near = 7;
 sun.shadow.camera.far = 28;
+sun.shadow.camera.updateProjectionMatrix();
+
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.035;
 scene.add(sun);
@@ -434,8 +509,14 @@ function createGlyphMask(font, word, centerX, centerZ, wordZ) {
 }
 
 const fontLoader = new FontLoader();
+let resolveFontReady;
+let rejectFontReady;
+const fontReady = new Promise((resolve, reject) => {
+  resolveFontReady = resolve;
+  rejectFontReady = reject;
+});
 fontLoader.load(
-  'https://threejs.org/examples/fonts/helvetiker_bold.typeface.json',
+  fontUrl,
   (font) => {
     const extrusionDepth = TEXT_SIZE * 0.14;
     const bevelThickness = TEXT_SIZE * 0.036;
@@ -558,6 +639,27 @@ fontLoader.load(
       craftyMask.nearestEdge(x, z).distance,
       hedgeMask.nearestEdge(x, z).distance,
     );
+
+    // World-space XZ bounds of the whole sign, expanded by FILL_BAND. The fill
+    // band only ever wants cells within FILL_BAND of a glyph edge, so any cell
+    // outside this box is guaranteed too far — and can be rejected with four
+    // comparisons instead of two full glyph-edge polygon scans. Without this gate
+    // the fill build paid a ~per-cell scan across the entire hedge footprint (the
+    // dense 0.1 grid is hundreds of thousands of cells), which dominated startup.
+    const textBounds = new THREE.Box3();
+    for (const mesh of [craftyMesh, hedgeMesh]) {
+      const box = mesh.geometry.boundingBox.clone();
+      box.translate(signGroup.position).translate(mesh.position);
+      textBounds.union(box);
+    }
+    const FILL_BOUND_MIN_X = textBounds.min.x - FILL_BAND;
+    const FILL_BOUND_MAX_X = textBounds.max.x + FILL_BAND;
+    const FILL_BOUND_MIN_Z = textBounds.min.z - FILL_BAND;
+    const FILL_BOUND_MAX_Z = textBounds.max.z + FILL_BAND;
+    const isNearText = (x, z) => (
+      x >= FILL_BOUND_MIN_X && x <= FILL_BOUND_MAX_X
+      && z >= FILL_BOUND_MIN_Z && z <= FILL_BOUND_MAX_Z
+    );
     nearestRockEdgeTest = (x, z) => {
       const craftyEdge = craftyMask.nearestEdge(x, z);
       const hedgeEdge = hedgeMask.nearestEdge(x, z);
@@ -569,6 +671,9 @@ fontLoader.load(
       centerX: HEDGE_CENTER_X,
       centerZ: HEDGE_CENTER_Z,
       visibilityTest: (x, z) => {
+        // Cheap rejects first: the vast majority of cells are far from any letter,
+        // so the box test culls them before the expensive glyph-edge scan runs.
+        if (!isNearText(x, z)) return false;
         if (!isInVisibleHedge(x, z)) return false;
         if (craftyMask.contains(x, z) || hedgeMask.contains(x, z)) return false;
         const edge = nearestRockEdge(x, z);
@@ -607,7 +712,10 @@ fontLoader.load(
     applyWindAvoidance(mossTop);
     applyWindAvoidance(fillTop);
     updateStats();
-  }
+    resolveFontReady();
+  },
+  undefined,
+  (error) => rejectFontReady(error),
 );
 
 function resize() {
@@ -667,13 +775,20 @@ function getFlowerVisit(x, z, now) {
 
   let visit = flowerVisitGrid.get(key);
   if (!visit) {
-    visit = { count: 1, progress: 0, leftAt: -Infinity, levelChangedAt: now };
+    visit = {
+      count: 1,
+      peakCount: 1,
+      progress: 0,
+      leftAt: -Infinity,
+      levelChangedAt: now,
+    };
     flowerVisitGrid.set(key, visit);
   } else if (!decayFlowerVisit(visit, now) && now - visit.leftAt >= FLOWER_REENTRY_DELAY) {
     if (visit.count < FLOWER_LEVELS) {
       visit.progress += 1;
       if (visit.progress >= FLOWER_LEVEL_REVISITS[visit.count]) {
         visit.count += 1;
+        visit.peakCount = Math.max(visit.peakCount, visit.count);
         visit.progress = 0;
         visit.levelChangedAt = now;
       }
@@ -693,6 +808,8 @@ function leaveFlowerArea() {
 }
 
 function spawnFlowerAtPointer(event) {
+  if (!flowerPatch) return;
+
   const rect = canvas.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
   const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -720,10 +837,13 @@ function spawnFlowerAtPointer(event) {
     const dz = z - lastFlowerSpawn.z;
     if (dx * dx + dz * dz < FLOWER_SPAWN_STEP * FLOWER_SPAWN_STEP) return;
   }
-  lastFlowerSpawn = { x, z };
-
   // Each flower that breaks ground nudges the surrounding hedge tufts aside,
   // so the moss reads as parting for the new growth rather than ignoring it.
+  const levelsBelowPeak = visit.peakCount - visit.count;
+  const legacyChance = levelsBelowPeak > 0
+    ? Math.min(0.65, 0.25 + levelsBelowPeak * 0.12)
+    : 0;
+  const legacyStage = visit.peakCount - 1;
   let planted;
   if (growsOnTextBoundary) {
     const edgeX = x - rockEdge.x * rockEdge.distance;
@@ -732,17 +852,48 @@ function spawnFlowerAtPointer(event) {
       edgeX + rockEdge.x * TEXT_FLOWER_EDGE_OFFSET,
       edgeZ + rockEdge.z * TEXT_FLOWER_EDGE_OFFSET,
       visit.count - 1,
+      legacyChance,
+      legacyStage,
     );
   } else {
-    planted = flowerPatch.scatter(x, z, visit.count - 1);
+    planted = flowerPatch.scatter(x, z, visit.count - 1, legacyChance, legacyStage);
   }
+  if (planted.length === 0) return;
+
+  // Only consume the movement step after a flower actually found room. Failed
+  // collision attempts can retry immediately instead of creating a dead patch.
+  lastFlowerSpawn = { x, z };
   for (const p of planted) {
+    const basalScaleAt = (basalX, basalZ) => {
+      if (!nearestRockEdgeTest) return 1;
+      const distance = nearestRockEdgeTest(basalX, basalZ).distance;
+      // The unscaled grass reaches roughly 0.3 units from its root. Reserve a
+      // hard margin for its wind movement, then fit the whole blade footprint
+      // into the remaining gap instead of testing the root point alone.
+      const availableRadius = distance - 0.09;
+      if (availableRadius <= 0.035) return 0;
+      return THREE.MathUtils.clamp(availableRadius / 0.3, 0, 1);
+    };
+    const centerScale = basalScaleAt(p.rootX, p.rootZ);
+    if (centerScale >= 0.18) growthShoots.add(p.rootX, p.rootZ, centerScale);
+    const rootAngle = Math.atan2(p.z - p.rootZ, p.x - p.rootX);
+    if (centerScale > 0.5) {
+      const leftX = p.rootX + Math.cos(rootAngle + 2.15) * 0.12;
+      const leftZ = p.rootZ + Math.sin(rootAngle + 2.15) * 0.12;
+      const rightX = p.rootX + Math.cos(rootAngle - 2.15) * 0.12;
+      const rightZ = p.rootZ + Math.sin(rootAngle - 2.15) * 0.12;
+      const leftScale = basalScaleAt(leftX, leftZ);
+      const rightScale = basalScaleAt(rightX, rightZ);
+      if (leftScale >= 0.35) growthShoots.add(leftX, leftZ, leftScale);
+      if (rightScale >= 0.35) growthShoots.add(rightX, rightZ, rightScale);
+    }
     mossTop.pushFrom(p.x, p.z);
     if (fillTop) fillTop.pushFrom(p.x, p.z);
   }
 }
 
 canvas.addEventListener('pointermove', spawnFlowerAtPointer);
+canvas.addEventListener('pointerenter', spawnFlowerAtPointer);
 canvas.addEventListener('pointerleave', leaveFlowerArea);
 canvas.addEventListener('pointercancel', leaveFlowerArea);
 
@@ -761,8 +912,9 @@ postProcessing.outputNode = sceneColor.add(bloomPass);
 function animate() {
   updateCamera();
   const dt = clock.getDelta();
-  flowerPatch.update(dt);
+  if (flowerPatch) flowerPatch.update(dt);
   mossTop.update(dt);
+  growthShoots.update(dt);
   if (fillTop) fillTop.update(dt);
   postProcessing.render();
 }
@@ -775,15 +927,42 @@ function updateStats() {
 
 async function start() {
   try {
+    setLoaderMessage('Starting the renderer…');
     await renderer.init();
   } catch (error) {
-    fallback.hidden = false;
-    fallback.textContent = 'WebGPU could not start in this browser.';
+    showUnsupported('WebGPU could not start in this browser.');
     console.error(error);
     return;
   }
 
   resize();
+
+  try {
+    setLoaderMessage('Growing the hedge…');
+    // The rock text + moss culling only exist once the font has loaded; wait for
+    // that before building anything downstream of the glyph masks.
+    await fontReady;
+
+    // Build the flower patch NOW, while the loader is still up, instead of after
+    // reveal. The visible stall before flowers appeared wasn't CPU geometry work
+    // (the meshes are tiny) — it was the lazy compilation of the per-species node
+    // materials, which WebGPU defers until each pipeline is first drawn. Creating
+    // the patch up front and then compileAsync()-ing the whole scene forces every
+    // pipeline (moss, rock, flowers, bloom) to compile during the loading screen,
+    // so the first real frame is already warm and flowers spawn instantly on hover.
+    setLoaderMessage('Planting the flowers…');
+    await createFlowers();
+    await renderer.compileAsync(scene, camera);
+
+    setLoaderMessage('Almost ready…');
+    await postProcessing.renderAsync();
+  } catch (error) {
+    showLoaderError('The scene failed to load.');
+    console.error(error);
+    return;
+  }
+
+  revealScene();
   renderer.setAnimationLoop(animate);
 }
 
