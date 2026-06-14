@@ -26,3 +26,7 @@ Live support data from [caniuse](https://caniuse.com/webgpu) (image updates dail
 [![WebGPU browser support](https://caniuse.bitsofco.de/image/webgpu.png)](https://caniuse.com/webgpu)
 
 You can also check your own browser at [webgpureport.org](https://webgpureport.org/).
+
+## Still to do
+
+- Optimization
