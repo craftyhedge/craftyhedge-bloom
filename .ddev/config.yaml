@@ -1,4 +1,4 @@
-name: craftyhedge-spa
+name: craftyhedge-static
 type: generic
 docroot: .
 php_version: "8.4"
@@ -12,7 +12,7 @@ database:
 use_dns_when_possible: true
 composer_version: "2"
 web_environment:
-    - DDEV_HOSTNAME=craftyhedge-spa.ddev.site
+    - DDEV_HOSTNAME=craftyhedge-static.ddev.site
 corepack_enable: false
 web_extra_exposed_ports:
     - name: vite
