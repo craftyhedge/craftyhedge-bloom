@@ -1060,6 +1060,9 @@ export function createFlowerPatch({
     } = speciesForm;
     const posture = THREE.MathUtils.lerp(closed, open + petal.ring * ringLift, wiltedOpening)
       + petal.postureOffset;
+    // Stash the live fold angle so detach can read the exact value (and carry
+    // the fold's momentum) without recomputing the eased curves.
+    petal.posture = posture;
     // Lift to the head height here (not baked into the geometry) so the petal's
     // own origin stays at its base — it then tumbles about its base when free,
     // not about the distant flower root.
@@ -1300,8 +1303,21 @@ export function createFlowerPatch({
           (rand() - 0.5) * 0.07,
           (rand() - 0.5) * 0.08 - ringDepth * 0.035,
         );
+        // Petals peel off across the back half of the close rather than all at
+        // once when it bottoms out. Outer rings (lower index, larger) let go
+        // first, inner/upper rings last, so the bloom visibly unravels from the
+        // edge inward while it is still folding. releaseAt is a wilt-progress
+        // threshold in [0.5, 1]; per-petal jitter keeps the cascade from reading
+        // as a rigid mechanical sweep.
+        const ringFraction = rings > 1 ? ring / (rings - 1) : rand();
+        const releaseAt = THREE.MathUtils.clamp(
+          0.5 + ringFraction * 0.42 + (rand() - 0.5) * 0.16,
+          0.5,
+          1,
+        );
         const petal = {
           flower, angle, ring, free: false, slot: -1,
+          releaseAt,
           r: tmpColor.r, g: tmpColor.g, b: tmpColor.b,
           // Cheap, stable imperfections keep cloned geometry from reading as a
           // radial stamp. These are folded into the existing instance matrix.
@@ -1313,9 +1329,11 @@ export function createFlowerPatch({
           pitch: (rand() - 0.5) * 0.3,
           roll: (rand() - 0.5) * 0.26,
           postureOffset: (rand() - 0.5) * postureSpread,
+          // live fold angle (stashed by writeAttachedPetal; read at detach)
+          posture: 0,
           // free-state fields (unused until detach)
           x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
-          rx: 0, ry: 0, rz: 0, dx: 0, dy: 0, dz: 0,
+          rx: 0, ry: 0, rz: 0, dx: 0, dy: 0, dz: 0, foldSpin: 0,
           flutter: rand() * Math.PI * 2, flutterRate: 1.8 + rand() * 1.6,
           scale: flower.scale,
           scaleX: flower.scale, scaleY: flower.scale, scaleZ: flower.scale,
@@ -1486,6 +1504,8 @@ export function createFlowerPatch({
   // Detach one petal: freeze its CURRENT world transform, then switch to physics.
   function detach(form, petal) {
     const flower = petal.flower;
+    const speciesForm = SPECIES[flower.species].form;
+    const { closed = 1.05, open = 0, ringLift = 0 } = speciesForm;
     // Refresh the final wilted petal pose, then compose the same swayed head and
     // local petal hierarchy used by the shader. This avoids a delta quaternion
     // handoff, which was sensitive to any transform-order discrepancy.
@@ -1525,20 +1545,42 @@ export function createFlowerPatch({
     const facing = petal.flower.rotation - petal.angle;
     petal.vx = Math.cos(facing) * out;
     petal.vz = Math.sin(facing) * out;
-    // Start at rest — the attached petal was only swaying (velocity ≈ 0), so a
-    // non-zero launch speed read as an instant jump. The buoyant lift term in
-    // the integrator now accelerates it up from 0, so release eases out of the
-    // bloom instead of popping. Spin starts at rest for the same reason.
-    petal.vy = 0;
+
+    // Carry the closing motion across the handoff. While wilting, the petal is
+    // actively folding: `posture` sweeps from `open` toward `closed` as the
+    // bloom shuts. Freezing it at a dead stop and then floating off threw that
+    // momentum away. Derive the fold's angular rate analytically (no per-frame
+    // cost) and seed the free petal's spin + lift with it, so the motion of the
+    // close continues into the wind instead of restarting from zero.
+    const wiltProgress = Math.min(1, (flower.age - flower.life) / flower.wiltDuration);
+    // d(wilt)/dt — smoothstep derivative 6p(1-p) over the wilt duration.
+    const dWilt = (6 * wiltProgress * (1 - wiltProgress)) / flower.wiltDuration;
+    // wiltedOpening ≈ 1 − 0.68·wilt at end of life (unfurl is settled), and
+    // posture = lerp(closed, postureTarget, wiltedOpening), so the fold rate is:
+    const postureTarget = open + petal.ring * ringLift;
+    const dPosture = (postureTarget - closed) * (-0.68 * dWilt); // rad/s, > 0 (folding in)
+    // The fold rotates the petal about its base (local Z). Carry that as spin
+    // (foldSpin, applied at full strength then decayed in the integrator), and
+    // as the tip sweeps up/over it gains an upward velocity ∝ cos(posture).
+    // Scale modestly: this is a momentum cue blending into buoyancy, not a launch.
+    petal.foldSpin = dPosture * 0.6;
+    const tipReach = (speciesForm.tip || 0.5) * headScale;
+    const foldLift = Math.cos(petal.posture) * dPosture * tipReach * 0.5;
+
+    // Start the vertical climb from the fold's residual upward sweep rather than
+    // a dead stop; buoyancy then takes over smoothly from this nonzero velocity.
+    petal.vy = THREE.MathUtils.clamp(foldLift, 0, 0.5);
     // Flight character, varied widely per petal so the swarm isn't uniform —
     // Motion develops after release, as though the air catches each petal.
     petal.buoyancy = 0.55 + rand() * 0.75;
     petal.swirl = 0.18 + rand() * 0.48;
     petal.windGain = 0.7 + rand() * 1.1;
     petal.flutterRate = 1.3 + rand() * 1.8;
+    // Random tumble drift — eases in from rest in the integrator, on top of the
+    // fold spin that carries the closing motion through.
     petal.dx = (rand() - 0.5) * 1.8;
     petal.dy = (rand() - 0.5) * 1.8;
-    petal.dz = (rand() - 0.5) * 1.8;
+    petal.dz = (rand() - 0.5) * 1.2;
   }
 
   function writeFreeCenter(form, center) {
@@ -1883,14 +1925,27 @@ export function createFlowerPatch({
           const wiltProgress = Math.min(1, (flower.age - flower.life) / flower.wiltDuration);
           flower.wilt = wiltProgress * wiltProgress * (3 - 2 * wiltProgress);
 
-          if (wiltProgress >= 1) {
+          // Release petals whose threshold the close has now passed, peeling the
+          // bloom apart mid-fold rather than detaching everything at the bottom.
+          // Iterate back-to-front so swap-removal from petalRecords is safe, and
+          // still-attached petals keep animating their close (writeAttachedPetal
+          // reads flower.wilt every frame). Petals detach from their current
+          // partly-closed pose, so there is no pop into airborne physics.
+          for (let p = flower.petalRecords.length - 1; p >= 0; p -= 1) {
+            const petal = flower.petalRecords[p];
+            if (wiltProgress < petal.releaseAt) continue;
+            detach(form, petal);
+            const last = flower.petalRecords.length - 1;
+            if (p !== last) flower.petalRecords[p] = flower.petalRecords[last];
+            flower.petalRecords.pop();
+          }
+
+          // Once the close has bottomed out and every petal has let go, drop the
+          // centre and hand the stem over to the dying (droop/retract) phase.
+          if (wiltProgress >= 1 && flower.petalRecords.length === 0) {
             flower.wilting = false;
             flower.dying = true;
             flower.deathAge = 0;
-            // Detach from the final, partly closed pose so there is no pop when
-            // the petals switch from rooted transforms to airborne physics.
-            for (const petal of flower.petalRecords) detach(form, petal);
-            flower.petalRecords.length = 0;
             detachCenter(form, flower);
           }
         }
@@ -1976,14 +2031,17 @@ export function createFlowerPatch({
           p.y += p.vy * dt;
           p.z += (p.vz + wz + WIND.x * curl + swirlZ) * dt;
 
-          // Lively tumble — petals spin as they ride the air. Ramp the spin in
-          // from rest over the first ~0.7s so the petal doesn't snap into a
-          // full-speed rotation the instant it detaches; the air "catches" it.
+          // Lively tumble — petals spin as they ride the air. The fold spin
+          // (foldSpin, about local Z) carries straight through from the closing
+          // motion at FULL strength so there's no dead stop, then decays as the
+          // air takes over. The random drift component eases in from rest over
+          // ~0.7s so it doesn't snap on unrelated to how the petal was closing.
           const spin = Math.min(1, p.age / 0.7);
           const spinRamp = spin * spin * (3 - 2 * spin);
+          const foldCarry = p.foldSpin * Math.exp(-p.age * 0.9);
           p.rx += (p.dx * spinRamp + swirlX * 1.5) * dt;
           p.ry += p.dy * spinRamp * dt;
-          p.rz += (p.dz * spinRamp + swirlZ * 1.5) * dt;
+          p.rz += (foldCarry + p.dz * spinRamp + swirlZ * 1.5) * dt;
 
           // Stay full-sized through the first quarter of the flight, then shrink
           // gradually across the remaining journey instead of vanishing late.
