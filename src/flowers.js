@@ -455,6 +455,30 @@ export function createFlowerPatch({
   const zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
   const WIND = windDirection.clone().normalize();
 
+  // Partial-upload tracking. The shared pools are huge (the petal mesh alone is
+  // >170k instances ≈ 11 MB of instanceMatrix), so flipping needsUpdate — which
+  // re-writes the WHOLE backing buffer on the WebGPU backend — once any petal is
+  // airborne dumped ~22 MB to the GPU every frame for the entire petal flight.
+  // That was the stutter when blooms died. Instead each writer records the slot
+  // range it touched per group (petal / base / center), and the flush uploads
+  // only that contiguous span via addUpdateRange. Ranges are tracked in SLOTS;
+  // the per-attribute stride converts to array elements at flush time.
+  const makeRange = () => ({ lo: Infinity, hi: -1 });
+  const markRange = (range, slot) => {
+    if (slot < range.lo) range.lo = slot;
+    if (slot > range.hi) range.hi = slot;
+  };
+  const resetRange = (range) => { range.lo = Infinity; range.hi = -1; };
+  // Queue one attribute's dirty slots as a single contiguous update range.
+  // Additive: the WebGPU backend consumes and clears updateRanges after each
+  // upload, so multiple queue calls in one frame (e.g. several place() calls
+  // plus the per-frame flush) coalesce instead of clobbering one another.
+  const uploadRange = (attr, range, stride) => {
+    if (range.hi < 0) return;
+    attr.addUpdateRange(range.lo * stride, (range.hi - range.lo + 1) * stride);
+    attr.needsUpdate = true;
+  };
+
   function initializeZeroScaleMatrices(mesh) {
     const matrices = mesh.instanceMatrix.array;
     // InstancedMesh starts every slot as identity. Clear the backing array in
@@ -787,7 +811,10 @@ export function createFlowerPatch({
     mesh.frustumCulled = false;
     // sway shares the tint buffer for `response` (flowerTint.w), so detach's
     // response-zeroing and tint writes both go through `attr`/`tintArr`.
-    const sway = { data: swayData, dataAttr: swayDataAttr, tintArr, tintAttr: attr };
+    const sway = {
+      data: swayData, dataAttr: swayDataAttr, tintArr, tintAttr: attr,
+      range: { lo: Infinity, hi: -1 },
+    };
     return { mesh, attr, tintArr, discGrowth, discGrowthAttr, sway, pose };
   };
 
@@ -822,6 +849,10 @@ export function createFlowerPatch({
     petals: [],
     bases: [],
     centers: [],
+    // Per-group touched-slot spans for partial uploads (see makeRange above).
+    petalRange: makeRange(),
+    baseRange: makeRange(),
+    centerRange: makeRange(),
   };
   const forms = [form];
   const group = new THREE.Group();
@@ -921,6 +952,7 @@ export function createFlowerPatch({
       THREE.MathUtils.lerp(petal.g, deadPetalColor.g, whiteness),
       THREE.MathUtils.lerp(petal.b, deadPetalColor.b, whiteness),
     );
+    markRange(form.petalRange, petal.slot);
   }
 
   function writeBaseTint(form, b) {
@@ -933,6 +965,7 @@ export function createFlowerPatch({
       THREE.MathUtils.lerp(b.flower.g, deadStemColor.g, death),
       THREE.MathUtils.lerp(b.flower.b, deadStemColor.b, death),
     );
+    markRange(form.baseRange, b.slot);
   }
 
   // Write a slot's GPU-sway inputs. swayData vec4 = (rootX, rootZ, phase, rot);
@@ -945,11 +978,15 @@ export function createFlowerPatch({
     sway.data[j + 2] = flower.species * 8 + flower.windPhase;
     sway.data[j + 3] = flower.rotation;
     sway.tintArr[slot * 4 + 3] = response;
+    markRange(sway.range, slot);
   }
 
+  // Upload only the swayData slots written since the last flush. The shared
+  // tint buffer (which also carries response in .w) is flushed by the caller
+  // through the form's petal/base range, so it isn't re-uploaded here.
   function markSwayDirty(sway) {
-    sway.dataAttr.needsUpdate = true;
-    sway.tintAttr.needsUpdate = true;
+    uploadRange(sway.dataAttr, sway.range, 4);
+    resetRange(sway.range);
   }
 
   function packTilts(tiltX, tiltZ) {
@@ -1059,6 +1096,7 @@ export function createFlowerPatch({
     // supplies the flower root translation, avoiding any inverse world transform.
     worldMat.makeTranslation(flower.x, yOffset + flower.y, flower.z);
     form.petalMesh.setMatrixAt(petal.slot, worldMat);
+    markRange(form.petalRange, petal.slot);
   }
 
   // Free petal: integrate its own world position/orientation.
@@ -1073,6 +1111,7 @@ export function createFlowerPatch({
     );
     worldMat.compose(pScratch, qScratch, sScratch);
     form.petalMesh.setMatrixAt(petal.slot, worldMat);
+    markRange(form.petalRange, petal.slot);
   }
 
   function writeBase(form, b) {
@@ -1091,6 +1130,7 @@ export function createFlowerPatch({
     form.discGrowth[j + 3] = Math.sin(flower.tiltDir) * (flower.tilt + droop);
     worldMat.makeTranslation(flower.x, yOffset + flower.y, flower.z);
     form.baseMesh.setMatrixAt(b.slot, worldMat);
+    markRange(form.baseRange, b.slot);
   }
 
   // --- petal slot management (per form) ------------------------------------
@@ -1116,6 +1156,7 @@ export function createFlowerPatch({
     }
     form.petals.pop();
     form.petalMesh.setMatrixAt(last, zeroMat);
+    markRange(form.petalRange, last);
     // Compaction changes every GPU input associated with the destination slot,
     // not just its matrix. Without uploading swayData, an attached petal moved
     // into a freed slot bends around the previous occupant's root/rotation.
@@ -1135,6 +1176,7 @@ export function createFlowerPatch({
     }
     form.bases.pop();
     form.baseMesh.setMatrixAt(last, zeroMat);
+    markRange(form.baseRange, last);
     form.dirty = true;
     markSwayDirty(form.baseSway);
   }
@@ -1287,12 +1329,10 @@ export function createFlowerPatch({
 
     flowers.push(flower);
     collisionInsert(flower);
-    form.petalAttr.needsUpdate = true;
-    form.petalPose.aAttr.needsUpdate = true;
-    form.petalPose.bAttr.needsUpdate = true;
-    form.petalMesh.instanceMatrix.needsUpdate = true;
-    form.baseAttr.needsUpdate = true;
-    form.baseMesh.instanceMatrix.needsUpdate = true;
+    // The slot writes above (matrix/tint/pose/sway) already marked their spans
+    // in petalRange/baseRange. Flag the form so the next update() flush uploads
+    // just those spans — placement no longer re-pushes the whole pool either.
+    form.dirty = true;
     markSwayDirty(form.petalSway);
     markSwayDirty(form.baseSway);
     return true;
@@ -1469,9 +1509,10 @@ export function createFlowerPatch({
     petal.deathWhiteness = 0;
     // Free petals are CPU-driven full world matrices now — kill GPU sway on this
     // slot so the shader doesn't double-apply wind on top of the flight matrix.
-    // response lives in flowerTint.w (slot*4+3).
+    // response lives in flowerTint.w (slot*4+3), which is the petal tint buffer —
+    // mark its span so the per-frame flush uploads it (no whole-buffer push).
     form.petalSway.tintArr[petal.slot * 4 + 3] = 0;
-    form.petalSway.tintAttr.needsUpdate = true;
+    markRange(form.petalRange, petal.slot);
     const flightLifeScale = THREE.MathUtils.lerp(
       0.45,
       1,
@@ -1484,7 +1525,11 @@ export function createFlowerPatch({
     const facing = petal.flower.rotation - petal.angle;
     petal.vx = Math.cos(facing) * out;
     petal.vz = Math.sin(facing) * out;
-    petal.vy = 0.26 + rand() * 0.18;
+    // Start at rest — the attached petal was only swaying (velocity ≈ 0), so a
+    // non-zero launch speed read as an instant jump. The buoyant lift term in
+    // the integrator now accelerates it up from 0, so release eases out of the
+    // bloom instead of popping. Spin starts at rest for the same reason.
+    petal.vy = 0;
     // Flight character, varied widely per petal so the swarm isn't uniform —
     // Motion develops after release, as though the air catches each petal.
     petal.buoyancy = 0.55 + rand() * 0.75;
@@ -1510,6 +1555,7 @@ export function createFlowerPatch({
       THREE.MathUtils.lerp(center.b, deadPetalColor.b, center.bleach),
     );
     form.centerMesh.setColorAt(center.slot, tmpColor);
+    markRange(form.centerRange, center.slot);
   }
 
   function detachCenter(form, flower) {
@@ -1543,7 +1589,9 @@ export function createFlowerPatch({
       disc,
       r: tmpColor.r, g: tmpColor.g, b: tmpColor.b,
       vx: (rand() - 0.5) * 0.04,
-      vy: 0.18 + rand() * 0.12,
+      // Start at rest, like the petals — the buoyancy term lifts it from 0 so
+      // the centre eases off the stem instead of jumping.
+      vy: 0,
       vz: (rand() - 0.5) * 0.04,
       dx: (rand() - 0.5) * 1.2,
       dy: (rand() - 0.5) * 1.2,
@@ -1568,6 +1616,7 @@ export function createFlowerPatch({
     }
     form.centers.pop();
     form.centerMesh.setMatrixAt(last, zeroMat);
+    markRange(form.centerRange, last);
   }
 
   // --- colony state ---------------------------------------------------------
@@ -1811,8 +1860,10 @@ export function createFlowerPatch({
       // Drive the GPU head sway. This single uniform replaces the per-petal
       // wind matrix recompute that used to run on the CPU every frame.
       windTimeUniform.value = windClock;
-      // Only upload the shared pools when some live flower changed their data.
-      for (const form of forms) form.dirty = false;
+      // form.dirty is cleared in the flush at the end of this method (not here),
+      // so a place() that ran between frames — setting dirty and marking its
+      // slot spans — still gets flushed on the next update instead of being
+      // wiped before it uploads.
       // Gusting: the breeze surges and lulls instead of a flat constant push.
       // Two offset sines → an irregular gust factor roughly in [0.6, 1.9].
       const gust = 1.25
@@ -1925,10 +1976,14 @@ export function createFlowerPatch({
           p.y += p.vy * dt;
           p.z += (p.vz + wz + WIND.x * curl + swirlZ) * dt;
 
-          // Lively tumble — petals spin as they ride the air.
-          p.rx += (p.dx + swirlX * 1.5) * dt;
-          p.ry += p.dy * dt;
-          p.rz += (p.dz + swirlZ * 1.5) * dt;
+          // Lively tumble — petals spin as they ride the air. Ramp the spin in
+          // from rest over the first ~0.7s so the petal doesn't snap into a
+          // full-speed rotation the instant it detaches; the air "catches" it.
+          const spin = Math.min(1, p.age / 0.7);
+          const spinRamp = spin * spin * (3 - 2 * spin);
+          p.rx += (p.dx * spinRamp + swirlX * 1.5) * dt;
+          p.ry += p.dy * spinRamp * dt;
+          p.rz += (p.dz * spinRamp + swirlZ * 1.5) * dt;
 
           // Stay full-sized through the first quarter of the flight, then shrink
           // gradually across the remaining journey instead of vanishing late.
@@ -1957,9 +2012,13 @@ export function createFlowerPatch({
           center.x += (center.vx + WIND.x * center.windGain * windRamp * gust) * dt;
           center.y += center.vy * dt;
           center.z += (center.vz + WIND.y * center.windGain * windRamp * gust) * dt;
-          center.rx += center.dx * dt;
-          center.ry += center.dy * dt;
-          center.rz += center.dz * dt;
+          // Ease the tumble in from rest (matches the petals) so the centre
+          // doesn't snap into a full-speed spin the instant it lets go.
+          const spin = Math.min(1, center.age / 0.7);
+          const spinRamp = spin * spin * (3 - 2 * spin);
+          center.rx += center.dx * spinRamp * dt;
+          center.ry += center.dy * spinRamp * dt;
+          center.rz += center.dz * spinRamp * dt;
           center.fade = Math.min(1, (1 - center.age / center.life) / 0.72);
           const bleach = Math.min(1, center.age / 0.75);
           center.bleach = bleach * bleach * (3 - 2 * bleach);
@@ -1968,19 +2027,28 @@ export function createFlowerPatch({
         }
       }
 
-      // Only re-upload buffers for forms that actually wrote a matrix this frame.
-      // Settled/empty species upload nothing — the GPU sway needs no CPU upload.
+      // Upload only the slot spans that were written this frame. Settled/empty
+      // species upload nothing. Crucially, a field full of floating petals now
+      // re-uploads just the live span instead of the whole ~11 MB instance
+      // buffer every frame — that whole-buffer re-upload was the death stutter.
       for (const form of forms) {
         if (!form.dirty) continue;
-        form.petalMesh.instanceMatrix.needsUpdate = true;
-        form.petalAttr.needsUpdate = true;
-        form.petalPose.aAttr.needsUpdate = true;
-        form.petalPose.bAttr.needsUpdate = true;
-        form.baseMesh.instanceMatrix.needsUpdate = true;
-        form.baseAttr.needsUpdate = true;
-        form.discGrowthAttr.needsUpdate = true;
-        form.centerMesh.instanceMatrix.needsUpdate = true;
-        if (form.centerMesh.instanceColor) form.centerMesh.instanceColor.needsUpdate = true;
+        const { petalRange, baseRange, centerRange } = form;
+        uploadRange(form.petalMesh.instanceMatrix, petalRange, 16);
+        uploadRange(form.petalAttr, petalRange, 4);
+        uploadRange(form.petalPose.aAttr, petalRange, 4);
+        uploadRange(form.petalPose.bAttr, petalRange, 4);
+        uploadRange(form.baseMesh.instanceMatrix, baseRange, 16);
+        uploadRange(form.baseAttr, baseRange, 4);
+        uploadRange(form.discGrowthAttr, baseRange, 4);
+        uploadRange(form.centerMesh.instanceMatrix, centerRange, 16);
+        if (form.centerMesh.instanceColor) {
+          uploadRange(form.centerMesh.instanceColor, centerRange, 3);
+        }
+        resetRange(petalRange);
+        resetRange(baseRange);
+        resetRange(centerRange);
+        form.dirty = false;
       }
     },
   };
