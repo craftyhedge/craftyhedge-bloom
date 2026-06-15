@@ -419,7 +419,11 @@ sun.shadow.normalBias = 0.035;
 scene.add(sun);
 scene.add(sun.target);
 
-const skyLight = new THREE.HemisphereLight(0xd7fff1, 0x101008, 3.0);
+// Hemisphere fill is what lights the shadowed grass and foreground — the parts
+// that read as "too dark". Lift its intensity and warm/brighten the ground-bounce
+// term so the moss in shade comes up, without touching the sun (which keeps the
+// lit flowers and highlight contrast exactly where they are).
+const skyLight = new THREE.HemisphereLight(0xd7fff1, 0x24301a, 4.1);
 scene.add(skyLight);
 
 const rim = new THREE.DirectionalLight(0xa8d8ff, 0.42);
