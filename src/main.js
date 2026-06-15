@@ -674,6 +674,21 @@ const fontReady = new Promise((resolve, reject) => {
 async function buildFontScene(font) {
     recordStartupTiming('font fetch and parse', fontRequestStartedAt);
     const fontSceneStartedAt = performance.now();
+
+    // The two text lines are generated fresh on load, so they can be overridden
+    // via ?text= (one word per line, separated by a comma). Uppercased to match
+    // the font's glyph coverage; falls back to the CRAFTY/HEDGE default.
+    // Both the rendered geometry and the glyph masks (which drive flower/foliage
+    // placement) derive from these strings, so custom text reshapes the scene too.
+    const textParam = new URLSearchParams(location.search).get('text');
+    // No param at all -> default phrase. Otherwise take exactly what's given:
+    // split on comma, so "HELLO" is a single line (empty bottom), not "HELLO,HEDGE".
+    const parts =
+      textParam === null
+        ? ['CRAFTY', 'HEDGE']
+        : textParam.toUpperCase().split(',').map((s) => s.trim());
+    const topLine = parts[0] ?? '';
+    const bottomLine = parts[1] ?? '';
     const extrusionDepth = TEXT_SIZE * 0.14;
     const bevelThickness = TEXT_SIZE * 0.036;
 
@@ -715,8 +730,8 @@ async function buildFontScene(font) {
     const signGroup = new THREE.Group();
 
     let fontPhaseStartedAt = performance.now();
-    const craftyMesh = createRockLetter('CRAFTY');
-    const hedgeMesh = createRockLetter('HEDGE');
+    const craftyMesh = createRockLetter(topLine);
+    const hedgeMesh = createRockLetter(bottomLine);
     recordStartupTiming('letter geometry construction', fontPhaseStartedAt);
 
     // Space the lines along Z (the direction the letter "up" maps to after the geo rotateX).
@@ -743,14 +758,14 @@ async function buildFontScene(font) {
     fontPhaseStartedAt = performance.now();
     const craftyMask = createGlyphMask(
       font,
-      'CRAFTY',
+      topLine,
       craftyMesh.userData.footprintCenter.x,
       craftyMesh.userData.footprintCenter.z,
       TEXT_CENTER_Z - TEXT_LINE_SPACING / 2,
     );
     const hedgeMask = createGlyphMask(
       font,
-      'HEDGE',
+      bottomLine,
       hedgeMesh.userData.footprintCenter.x,
       hedgeMesh.userData.footprintCenter.z,
       TEXT_CENTER_Z + TEXT_LINE_SPACING / 2,

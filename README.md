@@ -6,6 +6,8 @@
 
 Performance may vary.
 
+⚠️ WebGPU is required
+
 A bit of fun. This started as an excuse to play with **WebGPU** and Three.js.
 
 Sweep your pointer across the hedge and blooms break ground in your wake. Come back to a
@@ -16,6 +18,19 @@ Mostly it was an exploration: procedural grass, dappled "light through the trees
 and a little bloom glow, all driven on the GPU through Three.js's TSL node materials. No
 grand plan, no roadmap — just seeing how convincingly a handful of shaders can make
 something feel alive and growing. Expect rough edges; that's part of the fun.
+
+## Custom text
+
+The lettering is built fresh on every load, so you can swap it with a `?text=` query
+param — **two words max**, one per line, comma-separated. It's uppercased to match the
+font.
+
+- `?text=HELLO,WORLD` → **HELLO** over **WORLD**
+- `?text=HELLO` → just **HELLO** (second line stays empty)
+- no param → the usual **CRAFTY HEDGE**
+
+Long words can run past the framing — the camera doesn't auto-fit — and only characters
+the font actually has will show up (uppercase Latin and basic punctuation).
 
 ## ⚠️ WebGPU is required — not every browser supports it yet
 
@@ -30,6 +45,7 @@ Live support data from [caniuse](https://caniuse.com/webgpu) (image updates dail
 [![WebGPU browser support](https://caniuse.bitsofco.de/image/webgpu.png)](https://caniuse.com/webgpu)
 
 You can also check your own browser at [webgpureport.org](https://webgpureport.org/).
+
 
 ## Still to do
 
