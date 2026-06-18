@@ -11,7 +11,6 @@ import { dofWeighted } from './dofWeighted.js';
 import { createDappleNode } from './dapple.js';
 import fontUrl from 'three/examples/fonts/helvetiker_bold.typeface.json?url';
 
-
 const startupStartedAt = performance.now();
 const startupTimings = [];
 
@@ -1181,7 +1180,7 @@ function createGlyphMask(font, word, centerX, centerZ, wordZ) {
   return { contains, nearestEdge };
 }
 
-function createSceneNavSign(font) {
+function createSceneNavSign(labelFontFamily) {
   const group = new THREE.Group();
   group.userData.overlayId = 'about';
   group.userData.hoverState = { amount: 0 };
@@ -1189,13 +1188,38 @@ function createSceneNavSign(font) {
   const head = new THREE.Group();
   group.userData.head = head;
 
+  const createLabelTexture = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 160;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `800 132px ${labelFontFamily}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('ABOUT', canvas.width / 2, canvas.height / 2 + 4);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+  };
+
   const outlineMaterial = new THREE.MeshBasicMaterial({ color: 0x10130b });
-  const boardMaterial = new THREE.MeshLambertMaterial({ color: 0xe7c36b });
-  const boardDarkMaterial = new THREE.MeshLambertMaterial({ color: 0xd5aa58 });
-  const grainMaterial = new THREE.MeshBasicMaterial({ color: 0x6f4a1d });
+  const woodEdgeMaterial = new THREE.MeshLambertMaterial({ color: 0x241409 });
+  const boardMaterial = new THREE.MeshLambertMaterial({ color: 0x5a351c });
+  const boardDarkMaterial = new THREE.MeshLambertMaterial({ color: 0x432512 });
+  const grainMaterial = new THREE.MeshBasicMaterial({ color: 0x22130a });
   const mossMaterial = new THREE.MeshLambertMaterial({ color: 0x3f7f2a });
   const leafMaterial = new THREE.MeshLambertMaterial({ color: 0x628e3a });
   const leafDarkMaterial = new THREE.MeshLambertMaterial({ color: 0x2f6428 });
+  const leafVeinMaterial = new THREE.MeshBasicMaterial({
+    color: 0xb4d982,
+    transparent: true,
+    opacity: 0.52,
+    depthWrite: false,
+  });
   const signFlowerPetalMaterial = new THREE.MeshLambertMaterial({
     color: 0xdff2ff,
     emissive: 0x7fc8ff,
@@ -1255,11 +1279,23 @@ function createSceneNavSign(font) {
     opacity: 0.2,
     depthWrite: false,
   });
-  const postFrontMaterial = new THREE.MeshLambertMaterial({ color: 0x744724 });
-  const postSideMaterial = new THREE.MeshLambertMaterial({ color: 0x4f2d18 });
-  const postTopMaterial = new THREE.MeshLambertMaterial({ color: 0x87552b });
-  const postBottomMaterial = new THREE.MeshLambertMaterial({ color: 0x2f1b10 });
-  const textMaterial = new THREE.MeshBasicMaterial({ color: 0x161a10 });
+  const postFrontMaterial = new THREE.MeshLambertMaterial({ color: 0x4d2d18 });
+  const postSideMaterial = new THREE.MeshLambertMaterial({ color: 0x321b0e });
+  const postTopMaterial = new THREE.MeshLambertMaterial({ color: 0x684020 });
+  const postBottomMaterial = new THREE.MeshLambertMaterial({ color: 0x1e1008 });
+  const labelTexture = createLabelTexture();
+  const textMaterial = new THREE.MeshBasicMaterial({
+    color: 0xfff6df,
+    map: labelTexture,
+    transparent: true,
+    alphaTest: 0.04,
+  });
+  const labelShadowMaterial = new THREE.MeshBasicMaterial({
+    color: 0x10130b,
+    map: labelTexture,
+    transparent: true,
+    alphaTest: 0.04,
+  });
 
   const hitMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   const board = new THREE.Mesh(new THREE.BoxGeometry(1.36, 0.44, 0.035), hitMaterial);
@@ -1268,15 +1304,19 @@ function createSceneNavSign(font) {
   board.receiveShadow = true;
   board.userData.sceneNavRoot = group;
 
-  const boardOutline = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.58, 0.09), outlineMaterial);
-  boardOutline.position.copy(board.position);
-  boardOutline.position.z -= 0.012;
-
   const plankSpecs = [
     { y: 1.05, h: 0.16, x: -0.012, rot: 0.014, mat: boardMaterial },
     { y: 0.91, h: 0.15, x: 0.016, rot: -0.01, mat: boardDarkMaterial },
     { y: 0.77, h: 0.15, x: -0.018, rot: 0.012, mat: boardMaterial },
   ];
+  const plankEdges = plankSpecs.map(({ y, h, x, rot }) => {
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(1.39, h + 0.045, 0.075), woodEdgeMaterial);
+    edge.position.set(x, y - 0.006, -0.004);
+    edge.rotation.z = rot;
+    edge.castShadow = true;
+    edge.receiveShadow = true;
+    return edge;
+  });
   const planks = plankSpecs.map(({ y, h, x, rot, mat }) => {
     const plank = new THREE.Mesh(new THREE.BoxGeometry(1.34, h, 0.085), mat);
     plank.position.set(x, y, 0.01);
@@ -1305,9 +1345,6 @@ function createSceneNavSign(font) {
   const postHighlight = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.54, 0.01), postTopMaterial);
   postHighlight.position.set(-0.035, 0.39, 0.067);
   postHighlight.rotation.z = 0.025;
-
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.08, 0.1), outlineMaterial);
-  cap.position.set(0, 1.19, -0.004);
 
   const grain = [
     [ -0.46, 1.08, 0.066, 0.34, 0.012, 0.012 ],
@@ -1344,9 +1381,15 @@ function createSceneNavSign(font) {
   };
 
   const leafShape = new THREE.Shape();
-  leafShape.moveTo(0, 0.09);
-  leafShape.bezierCurveTo(-0.085, 0.055, -0.09, -0.035, 0, -0.105);
-  leafShape.bezierCurveTo(0.09, -0.035, 0.085, 0.055, 0, 0.09);
+  leafShape.moveTo(0, 0.12);
+  leafShape.bezierCurveTo(-0.035, 0.105, -0.05, 0.08, -0.052, 0.052);
+  leafShape.bezierCurveTo(-0.096, 0.054, -0.118, 0.018, -0.104, -0.018);
+  leafShape.bezierCurveTo(-0.086, -0.06, -0.042, -0.064, -0.014, -0.038);
+  leafShape.bezierCurveTo(-0.02, -0.075, -0.008, -0.104, 0, -0.122);
+  leafShape.bezierCurveTo(0.008, -0.104, 0.02, -0.075, 0.014, -0.038);
+  leafShape.bezierCurveTo(0.042, -0.064, 0.086, -0.06, 0.104, -0.018);
+  leafShape.bezierCurveTo(0.118, 0.018, 0.096, 0.054, 0.052, 0.052);
+  leafShape.bezierCurveTo(0.05, 0.08, 0.035, 0.105, 0, 0.12);
   const leafGeometry = new THREE.ExtrudeGeometry(leafShape, {
     depth: 0.012,
     bevelEnabled: true,
@@ -1355,6 +1398,8 @@ function createSceneNavSign(font) {
     bevelSegments: 1,
   });
   const leafOutlineGeometry = leafGeometry.clone();
+  const leafVeinGeometry = new THREE.BoxGeometry(0.008, 0.19, 0.004);
+  const leafSideVeinGeometry = new THREE.BoxGeometry(0.006, 0.088, 0.004);
 
   const makeLeaf = (x, y, scale, rot, mat = leafMaterial, tiltX = 0.18, tiltY = 0) => {
     const leafGroup = new THREE.Group();
@@ -1366,9 +1411,20 @@ function createSceneNavSign(font) {
     leaf.scale.set(scale, scale, 1);
     leaf.castShadow = true;
     leaf.receiveShadow = true;
+    const centerVein = new THREE.Mesh(leafVeinGeometry, leafVeinMaterial);
+    centerVein.position.z = 0.102;
+    centerVein.scale.set(scale * 0.75, scale * 0.95, 1);
+    const leftVein = new THREE.Mesh(leafSideVeinGeometry, leafVeinMaterial);
+    leftVein.position.set(-0.022 * scale, 0.012 * scale, 0.104);
+    leftVein.rotation.z = 0.78;
+    leftVein.scale.set(scale, scale, 1);
+    const rightVein = new THREE.Mesh(leafSideVeinGeometry, leafVeinMaterial);
+    rightVein.position.set(0.022 * scale, 0.012 * scale, 0.104);
+    rightVein.rotation.z = -0.78;
+    rightVein.scale.set(scale, scale, 1);
     leafGroup.position.set(x, y, 0);
     leafGroup.rotation.set(tiltX, tiltY, rot);
-    leafGroup.add(outline, leaf);
+    leafGroup.add(outline, leaf, centerVein, leftVein, rightVein);
     return leafGroup;
   };
 
@@ -1563,8 +1619,11 @@ function createSceneNavSign(font) {
     [-0.36, 0.74, 0.28, 0.75, leafMaterial, 0.28, 0.2],
     [-0.62, 0.78, 0.32, -0.5, leafDarkMaterial, 0.52, -0.1],
     [-0.76, 0.95, 0.34, 0.28, leafMaterial, 0.34, 0.18],
+    [-0.77, 1.04, 0.24, -0.38, leafDarkMaterial, 0.46, -0.08],
     [-0.69, 1.12, 0.34, -0.9, leafDarkMaterial, 0.48, -0.18],
+    [-0.61, 1.17, 0.22, 0.42, leafMaterial, 0.3, 0.18],
     [-0.52, 1.22, 0.3, 0.18, leafMaterial, 0.26, 0.14],
+    [-0.42, 1.22, 0.2, -0.72, leafDarkMaterial, 0.42, -0.16],
     [-0.3, 1.2, 0.26, -0.35, leafDarkMaterial, 0.42, -0.12],
   ].map(([x, y, scale, rot, mat, tiltX, tiltY]) => makeLeaf(x, y, scale, rot, mat, tiltX, tiltY));
 
@@ -1595,20 +1654,12 @@ function createSceneNavSign(font) {
     return nail;
   });
 
-  const labelGeometry = new TextGeometry('ABOUT', {
-    font,
-    size: 0.18,
-    depth: 0.006,
-    curveSegments: 2,
-    bevelEnabled: false,
-  });
-  labelGeometry.computeBoundingBox();
-  labelGeometry.center();
+  const labelGeometry = new THREE.PlaneGeometry(1.122, 0.35);
   const label = new THREE.Mesh(labelGeometry, textMaterial);
-  label.position.set(0, 0.89, 0.052);
+  label.position.set(0, 0.89, 0.074);
 
-  const labelShadow = new THREE.Mesh(labelGeometry.clone(), outlineMaterial);
-  labelShadow.position.set(0.012, 0.878, 0.048);
+  const labelShadow = new THREE.Mesh(labelGeometry.clone(), labelShadowMaterial);
+  labelShadow.position.set(0.012, 0.878, 0.07);
 
   group.add(
     post,
@@ -1618,8 +1669,7 @@ function createSceneNavSign(font) {
   );
 
   head.add(
-    boardOutline,
-    cap,
+    ...plankEdges,
     ...planks,
     board,
     ...grain,
@@ -1731,7 +1781,15 @@ const fontReady = new Promise((resolve, reject) => {
   resolveFontReady = resolve;
   rejectFontReady = reject;
 });
-async function buildFontScene(font) {
+async function loadFrauncesSignFont() {
+  const fontFamily = "'Fraunces', Georgia, serif";
+  if (document.fonts?.load) {
+    await document.fonts.load(`800 132px ${fontFamily}`);
+  }
+  return fontFamily;
+}
+
+async function buildFontScene(font, signFontFamily) {
     recordStartupTiming('font fetch and parse', fontRequestStartedAt);
     const fontSceneStartedAt = performance.now();
 
@@ -1817,7 +1875,7 @@ async function buildFontScene(font) {
     textGroup.add(signGroup);
     sceneNavGroup.clear();
     sceneNavHitTargets.length = 0;
-    const sceneNavSign = createSceneNavSign(font);
+    const sceneNavSign = createSceneNavSign(signFontFamily);
     sceneNavGroup.userData.hoverState = sceneNavSign.userData.hoverState;
     sceneNavGroup.add(sceneNavSign);
     updateSceneNavPlacement();
@@ -1959,7 +2017,9 @@ async function buildFontScene(font) {
 fontLoader.load(
   fontUrl,
   (font) => {
-    buildFontScene(font).catch(rejectFontReady);
+    loadFrauncesSignFont()
+      .then((signFont) => buildFontScene(font, signFont))
+      .catch(rejectFontReady);
   },
   undefined,
   (error) => rejectFontReady(error),
