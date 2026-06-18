@@ -5,13 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Crafty Hedge WebGPU foliage prototype with wind-blown flower generation."
+      content="Crafty Hedge is Martin Drahony, a Scotland-based Craft CMS developer building plugins and Craft websites."
     />
-    <title>Crafty Hedge Bloom</title>
+    <meta property="og:title" content="Crafty Hedge | Craft CMS Developer" />
+    <meta
+      property="og:description"
+      content="Craft CMS plugins and Craft website development from Martin Drahony, the developer behind Crafty Hedge."
+    />
+    <meta property="og:type" content="profile" />
+    <meta property="og:image" content="./docs/preview.webp" />
+    <meta property="og:site_name" content="Crafty Hedge" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Crafty Hedge | Craft CMS Developer" />
+    <meta
+      name="twitter:description"
+      content="Craft CMS plugins and Craft website development from Martin Drahony."
+    />
+    <meta name="twitter:image" content="./docs/preview.webp" />
+    <title>Crafty Hedge | Craft CMS Developer in Scotland</title>
   </head>
   <body class="bg-[#10170f] text-white antialiased">
     <div class="scene-stage" data-scene-stage>
       <canvas id="scene" class="absolute inset-0 h-full w-full scene-canvas" data-scene-canvas></canvas>
+
+      <nav class="site-nav" aria-label="Primary navigation">
+        <button class="site-nav__button" type="button" data-overlay-trigger="about" aria-expanded="false">
+          About
+        </button>
+      </nav>
 
       <div class="scene-loader" data-scene-loader>
         <div class="scene-loader__spinner" aria-hidden="true"></div>
@@ -27,6 +48,53 @@
         ></p>
         </section>
       </main>
+
+      <div class="overlay-layer" data-overlay-layer hidden>
+        <button class="overlay-layer__backdrop" type="button" data-overlay-close aria-label="Close overlay"></button>
+
+        <section class="overlay-panel" data-overlay-panel aria-live="polite" tabindex="-1">
+          <button class="overlay-panel__close" type="button" data-overlay-close aria-label="Close overlay">
+            Close
+          </button>
+
+          <article class="overlay-content" data-overlay-content="about" aria-labelledby="overlay-about-title">
+            <div class="overlay-content__box">
+              <a class="overlay-content__github" href="https://github.com/craftyhedge" aria-label="Crafty Hedge on GitHub">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 0.3C5.37 0.3 0 5.67 0 12.3c0 5.3 3.44 9.8 8.21 11.39 0.6 0.11 0.82-0.26 0.82-0.58 0-0.29-0.01-1.04-0.02-2.04-3.34 0.73-4.04-1.61-4.04-1.61-0.55-1.39-1.33-1.76-1.33-1.76-1.09-0.74 0.08-0.73 0.08-0.73 1.2 0.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49 0.99 0.11-0.77 0.42-1.3 0.76-1.6-2.67-0.3-5.47-1.33-5.47-5.93 0-1.31 0.47-2.38 1.24-3.22-0.12-0.3-0.54-1.52 0.12-3.18 0 0 1.01-0.32 3.3 1.23 0.96-0.27 1.98-0.4 3-0.4s2.04 0.14 3 0.4c2.29-1.55 3.3-1.23 3.3-1.23 0.66 1.66 0.24 2.88 0.12 3.18 0.77 0.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92 0.43 0.37 0.82 1.1 0.82 2.22 0 1.6-0.01 2.89-0.01 3.28 0 0.32 0.22 0.69 0.83 0.57C20.56 22.1 24 17.6 24 12.3c0-6.63-5.37-12-12-12Z" />
+                </svg>
+              </a>
+              <p class="overlay-content__eyebrow">Crafty Hedge</p>
+              <h1 id="overlay-about-title">About</h1>
+              <figure class="overlay-content__person">
+                <img src="./docs/martin.png" alt="" />
+                <figcaption>Martin</figcaption>
+              </figure>
+              <p>
+                Crafty Hedge is this guy 👉️
+              </p>
+              <p>
+                A middle weight web developer and project lead from Scotland.
+              </p>
+              <p>
+                This website is pointless, but these Craft CMS plugins are less pointless!
+              </p>
+              <p>
+                <a href="https://plugins.craftcms.com/developer/craftyhedge?craft5">Plugin Store - Crafty Hedge</a>
+              </p>
+              <p>
+                Craftsmanship and Craft CMS for the win.
+              </p>
+              <p>
+                Need a Craft web agency? Check out the <a href="https://honcho.agency/">Honcho team</a>!
+              </p>
+              <p class="overlay-content__smallprint">
+                No AI was harmed during the making of this website. There was a terrible amount of swearing though!
+              </p>
+            </div>
+          </article>
+        </section>
+      </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>

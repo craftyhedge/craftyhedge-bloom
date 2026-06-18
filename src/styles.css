@@ -21,7 +21,6 @@
      frame are ready, then fades in once data-ready is set on the canvas. */
   .scene-canvas {
     opacity: 0;
-    transition: opacity 600ms ease;
   }
 
   .scene-canvas[data-ready] {
@@ -72,6 +71,276 @@
     }
   }
 
+  .site-nav {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .site-nav__button {
+    min-height: 2.35rem;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    border-radius: 9999px;
+    padding: 0.45rem 1rem;
+    background: transparent;
+    color: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    line-height: 1;
+    text-transform: uppercase;
+    text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
+    transition:
+      border-color 180ms ease,
+      background-color 180ms ease,
+      color 180ms ease,
+      transform 180ms ease;
+  }
+
+  .site-nav__button:hover,
+  .site-nav__button:focus-visible,
+  .site-nav__button.is-active {
+    border-color: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.12);
+    outline: none;
+    transform: translateY(-1px);
+  }
+
+  .site-nav__button.is-active {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .overlay-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    display: block;
+    /* background: rgba(8, 15, 8, 0); */
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .overlay-layer.is-open {
+    pointer-events: auto;
+  }
+
+  .overlay-layer__backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border: 0;
+    background: transparent;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .overlay-panel {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0;
+    box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, 0.34);
+    color: #f8fff8;
+    opacity: 0;
+    pointer-events: none;
+    scrollbar-color: rgba(255, 255, 255, 0.55) rgba(255, 255, 255, 0.08);
+    scrollbar-width: thin;
+    text-shadow: 0 1px 18px rgba(0, 0, 0, 0.42);
+  }
+
+  .overlay-layer.is-open .overlay-layer__backdrop,
+  .overlay-layer.is-open .overlay-panel {
+    pointer-events: auto;
+  }
+
+  .overlay-panel:focus {
+    outline: none;
+  }
+
+  .overlay-panel__close {
+    position: sticky;
+    top: clamp(1rem, 3vw, 1.75rem);
+    float: right;
+    z-index: 1;
+    margin: clamp(1rem, 3vw, 1.75rem) clamp(1rem, 3vw, 1.75rem) 0 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    border-radius: 9999px;
+    padding: 0.45rem 0.85rem;
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    line-height: 1;
+    text-transform: uppercase;
+    transition:
+      border-color 180ms ease,
+      background-color 180ms ease;
+  }
+
+  .overlay-panel__close:hover,
+  .overlay-panel__close:focus-visible {
+    border-color: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.18);
+    outline: none;
+  }
+
+  .overlay-content {
+    width: min(44rem, 100%);
+    margin-inline: auto;
+    padding: clamp(2.2rem, 6vw, 4.5rem);
+    padding-top: clamp(5.5rem, 15vh, 9rem);
+  }
+
+  .overlay-content[hidden] {
+    display: none;
+  }
+
+  /* Centered card around the copy. Sits inside .overlay-content (which owns the
+     scroll column and top clearance), so it's independent of the close button.
+     The card chrome (border/background/shadow) lives on a ::before pseudo so it
+     can fade + scale in on its own timeline, independent of the text lines. */
+  .overlay-content__box {
+    position: relative;
+    padding: 2rem;
+    isolation: isolate;
+  }
+
+  .overlay-content__box::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 1rem;
+    background: rgba(8, 15, 8, 0.85);
+    box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.25);
+    /* GSAP drives these vars; the pseudo can't be tweened directly. */
+    opacity: var(--box-opacity, 1);
+    transform: scale(var(--box-scale, 1));
+    transform-origin: center;
+    will-change: opacity, transform;
+  }
+
+  .overlay-content h1 {
+    margin: 0 0 1rem;
+    font-size: clamp(2rem, 7vw, 4.4rem);
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 0.95;
+  }
+
+  .overlay-content p {
+    max-width: 36rem;
+    margin: 0;
+    color: rgba(248, 255, 248, 0.88);
+    font-size: clamp(1rem, 2.2vw, 1.12rem);
+    line-height: 1.75;
+  }
+
+  .overlay-content a {
+    color: #9fd3ff;
+    font-weight: 700;
+    text-decoration: underline;
+    text-decoration-color: rgba(159, 211, 255, 0.48);
+    text-underline-offset: 0.2em;
+    transition:
+      color 180ms ease,
+      text-decoration-color 180ms ease;
+  }
+
+  .overlay-content__eyebrow {
+    margin: 0 0 0.8rem !important;
+    color: rgba(198, 216, 226, 0.72) !important;
+    font-size: 0.75rem !important;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .overlay-content a:hover,
+  .overlay-content a:focus-visible {
+    color: #ffffff;
+    text-decoration-color: currentColor;
+    outline: none;
+  }
+
+  .overlay-content__github {
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+    display: inline-grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    color: rgba(248, 255, 248, 0.86);
+    text-decoration: none;
+    transition:
+      color 180ms ease,
+      transform 180ms ease;
+  }
+
+  .overlay-content__github svg {
+    width: 2rem;
+    height: 2rem;
+    fill: currentColor;
+  }
+
+  .overlay-content__github:hover,
+  .overlay-content__github:focus-visible {
+    color: #ffffff;
+    transform: translateY(-1px);
+  }
+
+  .overlay-content__person {
+    float: right;
+    width: clamp(5rem, 20vw, 8rem);
+    margin: 0 0 1rem 1.25rem;
+    text-align: center;
+  }
+
+  .overlay-content__person img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 598 / 769;
+    border-radius: 0.5rem;
+    object-fit: cover;
+    box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.28);
+  }
+
+  .overlay-content__person figcaption {
+    margin-top: 0.45rem;
+    color: rgba(248, 255, 248, 0.76);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .overlay-content .overlay-content__smallprint {
+    margin-top: 2.4rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid rgba(248, 255, 248, 0.12);
+    color: rgba(248, 255, 248, 0.407);
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  .overlay-content p + p {
+    margin-top: 1rem;
+  }
+
   .scene-stage {
     position: relative;
     width: 100%;
@@ -80,8 +349,27 @@
   }
 
   @media (max-width: 640px) {
-    .scene-stage {
+    /* .scene-stage {
       height: min(100svh, 170vw, 1000px);
+    } */
+
+    .site-nav {
+      top: 0.85rem;
+      gap: 0.45rem;
+    }
+
+    .site-nav__button {
+      min-height: 2.2rem;
+      padding-inline: 0.78rem;
+      font-size: 0.68rem;
+    }
+
+    .overlay-layer {
+      padding-top: 0;
+    }
+
+    .overlay-panel {
+      height: 100%;
     }
   }
 }

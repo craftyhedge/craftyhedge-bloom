@@ -1,16 +1,20 @@
 import './styles.css';
+import { gsap } from 'gsap';
 import * as THREE from 'three/webgpu';
 import { createGrowthShootField, createTuftBlanket } from './foliage.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { abs, color, mix, mx_fractal_noise_float, normalWorld, oneMinus, pass, positionWorld, smoothstep } from 'three/tsl';
+import { abs, clamp, color, mix, mx_fractal_noise_float, normalWorld, oneMinus, pass, positionWorld, smoothstep, uniform, vec4 } from 'three/tsl';
 import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
+import { dofWeighted } from './dofWeighted.js';
 import { createDappleNode } from './dapple.js';
 import fontUrl from 'three/examples/fonts/helvetiker_bold.typeface.json?url';
 
+
 const startupStartedAt = performance.now();
 const startupTimings = [];
+
 
 function recordStartupTiming(phase, startedAt, type = 'work') {
   startupTimings.push({
@@ -52,6 +56,75 @@ const sceneStage = document.querySelector('[data-scene-stage]');
 const fallback = document.querySelector('[data-webgpu-fallback]');
 const sceneLoader = document.querySelector('[data-scene-loader]');
 const sceneLoaderMessage = document.querySelector('[data-scene-loader-message]');
+const overlayLayer = document.querySelector('[data-overlay-layer]');
+const overlayPanel = document.querySelector('[data-overlay-panel]');
+const overlayTriggers = [...document.querySelectorAll('[data-overlay-trigger]')];
+const overlayContents = [...document.querySelectorAll('[data-overlay-content]')];
+const overlayCloseButtons = [...document.querySelectorAll('[data-overlay-close]')];
+let triggerOverlayById = () => {};
+let overlayDofAperture = null;
+let overlayDofMaxBlur = null;
+let overlayBloomAmount = null;
+let overlayFocusDistance = null;
+const DEBUG_HIDE_FOLIAGE = false;
+// Whole-scene dim, animated independently of the DOF/depth grade. Its own
+// uniform + its own tween so its strength and timing are free to diverge from
+// the blur. 0 = no dim, 1 = full dim toward OVERLAY_SCENE_DIM brightness.
+let overlaySceneDim = null;
+let requestedOverlayDofAmount = 0;
+let requestedOverlayFocusDistance = 0;
+const OVERLAY_DOF_APERTURE = 0.012;
+const OVERLAY_DOF_MAX_BLUR = 0.048;
+// Brightness floor the whole scene reaches at full dim (uniform, depth-agnostic).
+const OVERLAY_SCENE_DIM = 0.7;
+
+function setOverlayDofAmount(value, immediate = false) {
+  requestedOverlayDofAmount = value;
+  if (!overlayDofAperture || !overlayDofMaxBlur) return null;
+
+  requestedOverlayFocusDistance = getOverlayFocusDistance();
+  gsap.killTweensOf([overlayDofAperture, overlayDofMaxBlur, overlayFocusDistance]);
+  overlayFocusDistance.value = requestedOverlayFocusDistance;
+
+  if (immediate) {
+    overlayDofAperture.value = OVERLAY_DOF_APERTURE * value;
+    overlayDofMaxBlur.value = OVERLAY_DOF_MAX_BLUR * value;
+    if (overlayBloomAmount) overlayBloomAmount.value = 1 - value;
+    if (overlaySceneDim) overlaySceneDim.value = value;
+    return null;
+  }
+
+  // Open durations are stretched to land with the staggered content reveal
+  // (~0.9s: 0.12s start delay + (n-1)*0.07 stagger + 0.5s per line), so the
+  // scene settling into blur/dim finishes alongside the last line arriving
+  // rather than snapping done while the copy is still animating in. Close
+  // timings are left short — the exit shouldn't drag.
+  if (overlayBloomAmount) {
+    gsap.killTweensOf(overlayBloomAmount);
+    gsap.to(overlayBloomAmount, {
+      value: 1 - value,
+      duration: value > 0 ? 0.82 : 0.28,
+      ease: value > 0 ? 'power2.out' : 'power1.inOut',
+    });
+  }
+
+  // Whole-scene dim on its own timing — a touch slower in, quicker out — so it
+  // reads as a separate beat from the blur rather than locked to it.
+  if (overlaySceneDim) {
+    gsap.killTweensOf(overlaySceneDim);
+    gsap.to(overlaySceneDim, {
+      value,
+      duration: value > 0 ? 0.9 : 0.24,
+      ease: value > 0 ? 'power2.inOut' : 'power1.in',
+    });
+  }
+
+  return gsap.to([overlayDofAperture, overlayDofMaxBlur], {
+    value: (index) => (index === 0 ? OVERLAY_DOF_APERTURE : OVERLAY_DOF_MAX_BLUR) * value,
+    duration: value > 0 ? 0.82 : 0.28,
+    ease: value > 0 ? 'power2.out' : 'power1.inOut',
+  });
+}
 
 function setLoaderMessage(message) {
   if (sceneLoaderMessage) sceneLoaderMessage.textContent = message;
@@ -79,6 +152,249 @@ function showUnsupported(message) {
   showLoaderError(message);
 }
 
+function initOverlayNavigation() {
+  if (!overlayLayer || !overlayPanel || overlayTriggers.length === 0 || overlayContents.length === 0) return;
+
+  const contentById = new Map(overlayContents.map((content) => [content.dataset.overlayContent, content]));
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let activeOverlayId = overlayContents.find((content) => !content.hidden)?.dataset.overlayContent ?? null;
+  let isOpen = false;
+
+  gsap.set(overlayLayer, {
+    opacity: 0,
+    backgroundColor: 'rgba(8, 15, 8, 0)',
+  });
+  gsap.set(overlayPanel, { opacity: 0 });
+
+  function setActiveTrigger(id) {
+    for (const trigger of overlayTriggers) {
+      const isActive = isOpen && trigger.dataset.overlayTrigger === id;
+      trigger.classList.toggle('is-active', isActive);
+      trigger.setAttribute('aria-expanded', String(isActive));
+    }
+  }
+
+  // The animated children inside a content article. Media/action pieces can sit
+  // earlier in the DOM for layout, but they reveal just after the intro copy.
+  function revealTargets(content) {
+    const box = content.querySelector('.overlay-content__box');
+    const children = [...(box ?? content).children];
+    const delayed = new Set(children.filter((child) => (
+      child.matches('.overlay-content__person, .overlay-content__github')
+    )));
+    const firstParagraphIndex = children.findIndex((child) => child.matches('p:not(.overlay-content__eyebrow)'));
+    const insertAt = firstParagraphIndex === -1 ? children.length : firstParagraphIndex + 1;
+    return [
+      ...children.slice(0, insertAt).filter((child) => !delayed.has(child)),
+      ...delayed,
+      ...children.slice(insertAt).filter((child) => !delayed.has(child)),
+    ];
+  }
+
+  const CONTENT_IN_FROM = { opacity: 0, y: 24 };
+
+  // The card chrome (border/background/shadow) lives on .overlay-content__box's
+  // ::before. GSAP can't tween a pseudo directly, so we animate CSS vars on the
+  // box element and the pseudo reads --box-opacity / --box-scale.
+  const boxOf = (content) => content.querySelector('.overlay-content__box');
+  const BOX_IN_FROM = { '--box-opacity': 0, '--box-scale': 0.92 };
+
+  // Synchronously pin the card's lines to their hidden start state the instant
+  // the content is shown — BEFORE the browser paints. Without this the lines
+  // render at their natural position for a frame (the entrance starts on a
+  // timeline delay), so you see them flash into place and then animate.
+  function primeContentIn(content) {
+    if (prefersReducedMotion.matches) return;
+    const targets = revealTargets(content);
+    if (targets.length > 0) gsap.set(targets, CONTENT_IN_FROM);
+    const box = boxOf(content);
+    if (box) gsap.set(box, BOX_IN_FROM);
+  }
+
+  // Fade + zoom the card chrome in. Kept on its own tween (rather than folded
+  // into the line stagger) so callers can delay it slightly — the box settles
+  // in while the text is already rising into place.
+  function animateBoxIn(content) {
+    const box = boxOf(content);
+    if (!box) return null;
+
+    if (prefersReducedMotion.matches) {
+      gsap.set(box, { clearProps: '--box-opacity,--box-scale' });
+      return null;
+    }
+
+    return gsap.fromTo(
+      box,
+      BOX_IN_FROM,
+      {
+        '--box-opacity': 1,
+        '--box-scale': 1,
+        duration: 0.6,
+        ease: 'power2.out',
+        clearProps: '--box-opacity,--box-scale',
+      },
+    );
+  }
+
+  // Staggered entrance for the content card's lines: each rises and fades in
+  // just after the one above it. Returns the timeline so callers can sequence
+  // it (and so swaps can kill any in-flight reveal first). Assumes the targets
+  // are already at the hidden start state (see primeContentIn) so there's no
+  // flash before the tween begins.
+  function animateContentIn(content) {
+    const targets = revealTargets(content);
+    if (targets.length === 0) return null;
+
+    if (prefersReducedMotion.matches) {
+      gsap.set(targets, { clearProps: 'all' });
+      return null;
+    }
+
+    return gsap.fromTo(
+      targets,
+      CONTENT_IN_FROM,
+      {
+        opacity: 1,
+        y: 0,
+        duration: 0.5,
+        ease: 'power2.out',
+        stagger: 0.07,
+        clearProps: 'transform',
+      },
+    );
+  }
+
+  function showOverlayContent(id) {
+    const nextContent = contentById.get(id);
+    if (!nextContent || activeOverlayId === id) return;
+
+    activeOverlayId = id;
+    gsap.killTweensOf(overlayContents);
+
+    for (const content of overlayContents) {
+      content.hidden = content !== nextContent;
+      const box = boxOf(content);
+      gsap.killTweensOf(revealTargets(content));
+      if (box) gsap.killTweensOf(box);
+      gsap.set(content, { clearProps: 'all' });
+      gsap.set(revealTargets(content), { clearProps: 'all' });
+      if (box) gsap.set(box, { clearProps: '--box-opacity,--box-scale' });
+    }
+
+    // Swapping while already open: pin the new card's lines + chrome hidden in
+    // the same synchronous frame they're revealed, then replay the entrance —
+    // no flash. The box trails the text by a beat.
+    if (isOpen) {
+      primeContentIn(nextContent);
+      animateContentIn(nextContent);
+      gsap.delayedCall(0.12, () => animateBoxIn(nextContent));
+    }
+  }
+
+  function openOverlay(id) {
+    const nextContent = contentById.get(id);
+    if (!nextContent) return;
+
+    showOverlayContent(id);
+    // Pin the lines hidden synchronously now, before the panel fades in, so the
+    // delayed entrance (below) never lets them paint at their final position.
+    primeContentIn(nextContent);
+    isOpen = true;
+    overlayLayer.hidden = false;
+    overlayLayer.classList.add('is-open');
+    setActiveTrigger(id);
+
+    gsap.killTweensOf([overlayLayer, overlayPanel]);
+
+    if (prefersReducedMotion.matches) {
+      setOverlayDofAmount(1, true);
+      gsap.set(overlayLayer, { opacity: 1 });
+      gsap.set(overlayPanel, { opacity: 1 });
+      overlayPanel.focus({ preventScroll: true });
+      return;
+    }
+
+    setOverlayDofAmount(1);
+    gsap.timeline({
+      defaults: { ease: 'power1.out' },
+      onComplete: () => overlayPanel.focus({ preventScroll: true }),
+    })
+      .to(overlayLayer, { opacity: 1, duration: 0.26 }, 0)
+      .to(overlayPanel, { opacity: 1, duration: 0.24 }, 0)
+      // Lines rise in just after the panel starts fading up, so they animate
+      // into a visible card rather than behind a still-transparent one.
+      .add(() => animateContentIn(nextContent), 0.12)
+      // The card chrome fades + zooms in a beat behind the text, settling
+      // around the lines that are already on their way up.
+      .add(() => animateBoxIn(nextContent), 0.26);
+  }
+
+  function closeOverlay() {
+    if (!isOpen) return;
+
+    isOpen = false;
+    setActiveTrigger(activeOverlayId);
+    gsap.killTweensOf([overlayLayer, overlayPanel]);
+    const activeContent = activeOverlayId ? contentById.get(activeOverlayId) : null;
+    if (activeContent) {
+      gsap.killTweensOf(revealTargets(activeContent));
+      const box = boxOf(activeContent);
+      if (box) gsap.killTweensOf(box);
+    }
+
+    if (prefersReducedMotion.matches) {
+      setOverlayDofAmount(0, true);
+      gsap.set(overlayLayer, { opacity: 0 });
+      gsap.set(overlayPanel, { opacity: 0 });
+      overlayLayer.classList.remove('is-open');
+      overlayLayer.hidden = true;
+      return;
+    }
+
+    gsap.timeline({
+      defaults: { ease: 'power1.inOut' },
+      onComplete: () => {
+        overlayLayer.classList.remove('is-open');
+        overlayLayer.hidden = true;
+        setOverlayDofAmount(0);
+      },
+    })
+      .to(overlayPanel, { opacity: 0, duration: 0.16 }, 0)
+      .to(overlayLayer, { opacity: 0, duration: 0.18 }, 0);
+  }
+
+  for (const trigger of overlayTriggers) {
+    trigger.addEventListener('click', () => {
+      const id = trigger.dataset.overlayTrigger;
+      if (isOpen && activeOverlayId === id) closeOverlay();
+      else openOverlay(id);
+    });
+  }
+
+  triggerOverlayById = (id) => {
+    if (isOpen && activeOverlayId === id) closeOverlay();
+    else openOverlay(id);
+  };
+
+  for (const button of overlayCloseButtons) {
+    button.addEventListener('click', closeOverlay);
+  }
+
+  // Clicking the panel anywhere outside the content box closes the overlay —
+  // the box's margins read as dead space, so a click there is an intent to
+  // dismiss (same as the backdrop). Clicks inside the box are left alone so
+  // text selection and links keep working.
+  overlayPanel.addEventListener('click', (event) => {
+    if (!event.target.closest('.overlay-content__box')) closeOverlay();
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeOverlay();
+  });
+}
+
+initOverlayNavigation();
+
 // WebGPU is required: bail out before touching the renderer if the browser has
 // no `navigator.gpu` at all, so the user sees a clear message instead of a blank
 // canvas or an unhandled construction error.
@@ -95,7 +411,28 @@ const renderer = new THREE.WebGPURenderer({
   canvas,
 });
 
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.6));
+// Adaptive resolution: the scene is fill-rate bound (foliage overdraw + soft
+// shadows + full-screen bloom), so cost scales with the number of fragments.
+// On a 4K panel even a 1.6× device-pixel cap is ~21M fragments/frame, which is
+// what "melts" weaker GPUs. We cap the starting ratio by the actual rendered
+// pixel budget — small high-DPI laptops keep their sharpness, big panels start
+// more conservatively — then let the runtime monitor (see below) scale further.
+const MAX_PIXEL_RATIO = 1.6;
+const MIN_PIXEL_RATIO = 0.7;
+// Roughly a 1080p-at-1.5× budget. Above this we trade sharpness for frame rate.
+const PIXEL_BUDGET = 1920 * 1080 * 1.5 * 1.5;
+
+function pixelRatioForStage() {
+  const stagePixels = sceneStage.clientWidth * sceneStage.clientHeight;
+  const dprCap = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+  if (stagePixels <= 0) return dprCap;
+  // Largest ratio whose framebuffer stays within the pixel budget, clamped to
+  // the device cap above and a hard floor below.
+  const budgetRatio = Math.sqrt(PIXEL_BUDGET / stagePixels);
+  return THREE.MathUtils.clamp(Math.min(dprCap, budgetRatio), MIN_PIXEL_RATIO, MAX_PIXEL_RATIO);
+}
+
+renderer.setPixelRatio(pixelRatioForStage());
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 // Neutral (Khronos PBR Neutral) instead of ACES: ACES rolls saturated brights
 // toward white, which was quietly pastel-ising the neon flowers. Neutral keeps
@@ -112,7 +449,25 @@ scene.background = new THREE.Color(0x173f18);
 const DESIGN_ASPECT = 16 / 9;
 const DESIGN_VERTICAL_FOV = 42;
 const GROUND_Y = 0;
-const TEXT_SIZE = 2.75;
+
+// Responsive text size (computed once at load, NOT live-reactive). The camera
+// fits itself to the text frame, so a fixed-size title forces the camera to pull
+// back on narrow screens — which shrinks the fixed-world-size tufts/flowers and
+// packs them denser. Scaling the title DOWN with viewport width instead keeps the
+// camera at a roughly constant distance, so tuft/flower on-screen size and density
+// stay consistent across devices. Desktop (>= reference width) keeps the original
+// 2.75; narrower screens scale ~proportionally to width down to a floor.
+const TEXT_SIZE_DESKTOP = 2.75;       // size at/above the reference width (unchanged desktop look)
+const TEXT_SIZE_REFERENCE_WIDTH = 1440; // px at which the desktop size applies
+const TEXT_SIZE_MIN_SCALE = 0.55;     // floor so very small screens don't get a tiny title
+function computeTextSize() {
+  const width = sceneStage.clientWidth || TEXT_SIZE_REFERENCE_WIDTH;
+  // Below the reference width, scale proportionally to width; never exceed the
+  // desktop size on larger screens (desktop density is already where we want it).
+  const scale = THREE.MathUtils.clamp(width / TEXT_SIZE_REFERENCE_WIDTH, TEXT_SIZE_MIN_SCALE, 1);
+  return TEXT_SIZE_DESKTOP * scale;
+}
+const TEXT_SIZE = computeTextSize();
 const TEXT_CENTER_Z = -1.8;
 const TEXT_LINE_SPACING = TEXT_SIZE * 1.22;
 const INITIAL_STAGE_ASPECT = sceneStage.clientWidth / sceneStage.clientHeight;
@@ -128,6 +483,7 @@ const cameraHome = new THREE.Vector3(0, 14, 6);
 const cameraOffset = cameraHome.clone().sub(cameraTarget);
 const camera = new THREE.PerspectiveCamera(DESIGN_VERTICAL_FOV, INITIAL_STAGE_ASPECT, 0.08, 120);
 const textFrameCorners = [];
+const overlayFocusPoint = new THREE.Vector3();
 
 for (const x of [-TEXT_FRAME_HALF_WIDTH, TEXT_FRAME_HALF_WIDTH]) {
   for (const y of [GROUND_Y, GROUND_Y + TEXT_FRAME_HEIGHT]) {
@@ -183,6 +539,15 @@ function fitCameraToText(aspect) {
 }
 
 fitCameraToText(INITIAL_STAGE_ASPECT);
+
+function getOverlayFocusDistance() {
+  // In front of the lower word's midline. Pushing the focus plane further toward
+  // the camera (larger +Z term) leaves the text further off-focus, so the bottom
+  // band reads softer rather than pin-sharp while the rest still falls away.
+  overlayFocusPoint.set(0, GROUND_Y, TEXT_CENTER_Z + TEXT_LINE_SPACING / 2 + TEXT_SIZE * 1.6);
+  overlayFocusPoint.applyMatrix4(camera.matrixWorldInverse);
+  return -overlayFocusPoint.z;
+}
 
 function getGroundCorner(ndcX, ndcY) {
   const point = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(camera);
@@ -264,7 +629,10 @@ hedgeBaseGeometry.computeVertexNormals();
 const hedgeBase = new THREE.Mesh(
   hedgeBaseGeometry,
   new THREE.MeshStandardMaterial({
-    color: 0x123b14,
+    // Matched to the dark blade-root tone (~0x071f08) so the ground reads as the
+    // same deep green where it shows through the gaps of the sparser 8-blade
+    // tufts, rather than the brighter green it used to be.
+    color: 0x061806,
     roughness: 1,
     metalness: 0,
   }),
@@ -347,7 +715,8 @@ const growthShoots = createGrowthShootField({
 });
 recordStartupTiming('growth shoot construction', startupPhaseStartedAt);
 
-scene.add(hedgeBase, mossTop.mesh, growthShoots.mesh);
+scene.add(hedgeBase);
+if (!DEBUG_HIDE_FOLIAGE) scene.add(mossTop.mesh, growthShoots.mesh);
 
 let flowerPatch = null;
 
@@ -365,6 +734,8 @@ async function createFlowers() {
     yOffset: GROUND_Y,
     canGrow: (x, z, crownRadius = 0) => {
       if (!isInInitialMoss(x, z)) return false;
+      const signClearance = THREE.MathUtils.clamp(crownRadius * 0.45 + 0.08, 0.1, 0.34);
+      if (isInsideSceneNavFlowerKeepOut(x, z, signClearance)) return false;
       if (isUnderRockTest && isUnderRockTest(x, z)) return false;
       if (!nearestRockEdgeTest) return true;
 
@@ -378,9 +749,21 @@ async function createFlowers() {
     // Near the rock, force stems to lean away from the nearest glyph edge and
     // suppress most wind bend. Farther out they regain random lean and full wind.
     tiltScale: (x, z) => {
-      if (!nearestRockEdgeTest) return 1;
+      const signAvoidanceSample = getSceneNavFlowerAvoidance(x, z);
+      const signAvoidance = signAvoidanceSample
+        ? {
+            scale: THREE.MathUtils.lerp(1, 0.38, signAvoidanceSample.influence),
+            direction: signAvoidanceSample.direction,
+            directionInfluence: signAvoidanceSample.influence,
+            windScale: THREE.MathUtils.lerp(1, 0.06, signAvoidanceSample.influence),
+          }
+        : null;
+
+      if (!nearestRockEdgeTest) return signAvoidance ?? 1;
       const edge = nearestRockEdgeTest(x, z);
       const edgeInfluence = 1 - THREE.MathUtils.smoothstep(edge.distance, 0.18, 0.62);
+      if (signAvoidance && signAvoidanceSample.influence >= edgeInfluence) return signAvoidance;
+
       return {
         scale: THREE.MathUtils.lerp(1, 0.48, edgeInfluence),
         direction: Math.atan2(-edge.x, edge.z),
@@ -395,7 +778,7 @@ async function createFlowers() {
     wind: hedgeWind,
   });
   recordStartupTiming('flower construction', flowerPhaseStartedAt);
-  scene.add(flowerPatch.object);
+  if (!DEBUG_HIDE_FOLIAGE) scene.add(flowerPatch.object);
 }
 
 const sun = new THREE.DirectionalLight(0xfff2c4, 4.0);
@@ -444,6 +827,196 @@ scene.children = scene.children.filter(child => !(child.userData && child.userDa
 const textGroup = new THREE.Group();
 textGroup.userData.isCraftyHedgeText = true;
 scene.add(textGroup);
+const sceneNavGroup = new THREE.Group();
+sceneNavGroup.userData.isSceneNav = true;
+scene.add(sceneNavGroup);
+const sceneNavRaycaster = new THREE.Raycaster();
+const sceneNavPointer = new THREE.Vector2();
+const sceneNavHitTargets = [];
+let hoveredSceneNav = null;
+let sceneNavHoverPinned = false;
+const SCENE_NAV_BASE_SCALE = 1.296;
+
+function updateSceneNavPlacement() {
+  if (sceneNavGroup.children.length === 0) return;
+
+  const anchor = getGroundCorner(0, 0.56);
+  sceneNavGroup.position.set(anchor.x, GROUND_Y, anchor.z);
+  sceneNavGroup.rotation.set(-0.42, 0.16, -0.1);
+  sceneNavGroup.scale.setScalar(SCENE_NAV_BASE_SCALE);
+}
+
+function getSceneNavHit(event) {
+  if (sceneNavHitTargets.length === 0) return null;
+
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+
+  sceneNavPointer.set(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+  );
+  sceneNavRaycaster.setFromCamera(sceneNavPointer, camera);
+
+  return sceneNavRaycaster.intersectObjects(sceneNavHitTargets, false)[0] ?? null;
+}
+
+function setSceneNavHover(next, hit = null) {
+  if (hoveredSceneNav === next) return;
+
+  const root = next ?? hoveredSceneNav;
+  hoveredSceneNav = next;
+  canvas.style.cursor = next ? 'pointer' : '';
+
+  const state = root?.userData.hoverState;
+  if (!state) return;
+  sceneNavGroup.userData.hoverState = state;
+  if (next && hit?.point && state.amount <= 0.02) setSceneNavHoverOrigin(root, hit.point);
+  state.direction = next ? 1 : -1;
+
+  gsap.killTweensOf(state);
+  gsap.to(state, {
+    amount: next ? 1 : 0,
+    duration: next ? 1.35 : 1.05,
+    ease: next ? 'power2.out' : 'sine.inOut',
+    onUpdate: () => {
+      updateSceneNavHoverFlowers(root);
+    },
+    onComplete: () => updateSceneNavHoverFlowers(root),
+  });
+}
+
+function setSceneNavHoverOrigin(root, worldPoint) {
+  const hoverFlowers = root?.userData.hoverFlowers;
+  if (!hoverFlowers) return;
+
+  sceneNavHoverOrigin.copy(worldPoint);
+  root.worldToLocal(sceneNavHoverOrigin);
+
+  let maxDistance = 0.001;
+  for (const flower of hoverFlowers) {
+    const dx = flower.position.x - sceneNavHoverOrigin.x;
+    const dy = flower.position.y - sceneNavHoverOrigin.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    flower.userData.entryDistance = distance;
+    maxDistance = Math.max(maxDistance, distance);
+  }
+
+  for (const flower of hoverFlowers) {
+    const distanceT = flower.userData.entryDistance / maxDistance;
+    const tinyVariation = (Math.sin(flower.position.x * 19.7 + flower.position.y * 31.3) + 1) * 0.025;
+    flower.userData.activeInDelay = THREE.MathUtils.clamp(
+      distanceT * 0.88 + tinyVariation,
+      0,
+      0.94,
+    );
+    flower.userData.activeOutDelay = THREE.MathUtils.clamp(
+      0.82 - distanceT * 0.56 + tinyVariation,
+      0.12,
+      0.86,
+    );
+  }
+}
+
+function updateSceneNavHoverFlowers(root) {
+  const state = root?.userData.hoverState;
+  const hoverFlowers = root?.userData.hoverFlowers;
+  if (!state || !hoverFlowers) return;
+
+  for (const flower of hoverFlowers) {
+    const delay = flower.userData.activeInDelay ?? flower.userData.inDelay;
+    const stemEnd = Math.min(1, delay + 0.28);
+    const bloomStart = Math.min(0.96, delay + 0.18);
+    const stemAmount = THREE.MathUtils.smoothstep(state.amount, delay, stemEnd);
+    const bloomAmount = THREE.MathUtils.smoothstep(state.amount, bloomStart, 1);
+    flower.visible = stemAmount > 0.001 || bloomAmount > 0.001;
+    flower.userData.stemGroup.scale.set(1, Math.max(0.001, stemAmount), 1);
+    flower.userData.bloomGroup.scale.setScalar(Math.max(0.001, bloomAmount));
+  }
+}
+
+const sceneNavLocalPoint = new THREE.Vector3();
+const sceneNavAvoidLocal = new THREE.Vector3();
+const sceneNavAvoidWorldDirection = new THREE.Vector3();
+const sceneNavAvoidQuaternion = new THREE.Quaternion();
+const sceneNavPointWindSource = new THREE.Vector3();
+const sceneNavHoverOrigin = new THREE.Vector3();
+function getSceneNavLocalPoint(x, z) {
+  if (sceneNavGroup.children.length === 0) return false;
+
+  sceneNavLocalPoint.set(x, GROUND_Y, z);
+  sceneNavGroup.worldToLocal(sceneNavLocalPoint);
+
+  return sceneNavLocalPoint;
+}
+
+function isInsideSceneNavFlowerKeepOut(x, z, margin = 0) {
+  const local = getSceneNavLocalPoint(x, z);
+  if (!local) return false;
+
+  return Math.abs(local.x) <= SIGN_FLOWER_KEEP_OUT_X + margin
+    && local.z >= -SIGN_FLOWER_KEEP_OUT_NEAR_Z - margin
+    && local.z <= SIGN_FLOWER_KEEP_OUT_FAR_Z + margin;
+}
+
+function getSceneNavFlowerAvoidance(x, z) {
+  if (sceneNavGroup.children.length === 0) return null;
+
+  sceneNavAvoidLocal.set(x, GROUND_Y, z);
+  sceneNavGroup.worldToLocal(sceneNavAvoidLocal);
+
+  const clampedX = THREE.MathUtils.clamp(
+    sceneNavAvoidLocal.x,
+    -SIGN_FLOWER_KEEP_OUT_X,
+    SIGN_FLOWER_KEEP_OUT_X,
+  );
+  const clampedZ = THREE.MathUtils.clamp(
+    sceneNavAvoidLocal.z,
+    -SIGN_FLOWER_KEEP_OUT_NEAR_Z,
+    SIGN_FLOWER_KEEP_OUT_FAR_Z,
+  );
+  let awayX = sceneNavAvoidLocal.x - clampedX;
+  let awayZ = sceneNavAvoidLocal.z - clampedZ;
+  let distance = Math.hypot(awayX, awayZ);
+
+  if (distance < 0.0001) {
+    awayX = sceneNavAvoidLocal.x;
+    awayZ = sceneNavAvoidLocal.z - 0.18;
+    distance = Math.hypot(awayX, awayZ);
+  }
+  const hoverAmount = sceneNavGroup.userData.hoverState?.amount ?? 0;
+  const avoidRadius = SIGN_FLOWER_AVOID_RADIUS + hoverAmount * 0.28;
+  if (distance >= avoidRadius || distance < 0.0001) return null;
+
+  sceneNavAvoidWorldDirection
+    .set(awayX / distance, 0, awayZ / distance)
+    .applyQuaternion(sceneNavGroup.getWorldQuaternion(sceneNavAvoidQuaternion));
+  const worldLength = Math.hypot(sceneNavAvoidWorldDirection.x, sceneNavAvoidWorldDirection.z);
+  if (worldLength < 0.0001) return null;
+
+  const influence = 1 - THREE.MathUtils.smoothstep(distance, 0, avoidRadius);
+  return {
+    direction: Math.atan2(
+      sceneNavAvoidWorldDirection.z / worldLength,
+      sceneNavAvoidWorldDirection.x / worldLength,
+    ),
+    influence,
+  };
+}
+
+function updateSceneNavPointWind() {
+  if (!flowerPatch?.setPointWind || sceneNavGroup.children.length === 0) return;
+
+  const amount = sceneNavGroup.userData.hoverState?.amount ?? 0;
+  sceneNavPointWindSource.set(0, 0, 0);
+  sceneNavGroup.localToWorld(sceneNavPointWindSource);
+  flowerPatch.setPointWind({
+    x: sceneNavPointWindSource.x,
+    z: sceneNavPointWindSource.z,
+    radius: SIGN_FLOWER_RADIAL_WIND_RADIUS,
+    strength: amount * SIGN_FLOWER_RADIAL_WIND_STRENGTH,
+  });
+}
 
 const rockMaterial = new THREE.MeshStandardNodeMaterial({
   // Not fully matte: a little roughness headroom gives the broad letter faces a
@@ -579,6 +1152,462 @@ function createGlyphMask(font, word, centerX, centerZ, wordZ) {
   }
 
   return { contains, nearestEdge };
+}
+
+function createSceneNavSign(font) {
+  const group = new THREE.Group();
+  group.userData.overlayId = 'about';
+  group.userData.hoverState = { amount: 0 };
+
+  const head = new THREE.Group();
+  group.userData.head = head;
+
+  const outlineMaterial = new THREE.MeshBasicMaterial({ color: 0x10130b });
+  const boardMaterial = new THREE.MeshLambertMaterial({ color: 0xe7c36b });
+  const boardDarkMaterial = new THREE.MeshLambertMaterial({ color: 0xd5aa58 });
+  const grainMaterial = new THREE.MeshBasicMaterial({ color: 0x6f4a1d });
+  const mossMaterial = new THREE.MeshLambertMaterial({ color: 0x3f7f2a });
+  const leafMaterial = new THREE.MeshLambertMaterial({ color: 0x628e3a });
+  const leafDarkMaterial = new THREE.MeshLambertMaterial({ color: 0x2f6428 });
+  const signFlowerPetalMaterial = new THREE.MeshLambertMaterial({
+    color: 0xdff2ff,
+    emissive: 0x7fc8ff,
+    emissiveIntensity: 0.2,
+  });
+  const signFlowerPetalShadeMaterial = new THREE.MeshLambertMaterial({
+    color: 0xbfd9f2,
+    emissive: 0x66b7f0,
+    emissiveIntensity: 0.12,
+  });
+  const signFlowerSmallPetalMaterial = new THREE.MeshLambertMaterial({
+    color: 0x8fb8ef,
+    emissive: 0x3f91db,
+    emissiveIntensity: 0.14,
+  });
+  const signFlowerSmallPetalShadeMaterial = new THREE.MeshLambertMaterial({
+    color: 0x5f8fd0,
+    emissive: 0x2d78bd,
+    emissiveIntensity: 0.08,
+  });
+  const signFlowerLargePetalMaterial = new THREE.MeshLambertMaterial({
+    color: 0xf0fbff,
+    emissive: 0xa6dcff,
+    emissiveIntensity: 0.22,
+  });
+  const signFlowerLargePetalShadeMaterial = new THREE.MeshLambertMaterial({
+    color: 0xd5ecff,
+    emissive: 0x83c8f5,
+    emissiveIntensity: 0.14,
+  });
+  const signFlowerCenterMaterial = new THREE.MeshLambertMaterial({
+    color: 0xffd96a,
+    emissive: 0xffd760,
+    emissiveIntensity: 0.18,
+  });
+  const signFlowerSmallCenterMaterial = new THREE.MeshLambertMaterial({
+    color: 0xf6c85a,
+    emissive: 0xf4c04c,
+    emissiveIntensity: 0.14,
+  });
+  const signFlowerLargeCenterMaterial = new THREE.MeshLambertMaterial({
+    color: 0xffe58a,
+    emissive: 0xffdf72,
+    emissiveIntensity: 0.2,
+  });
+  const signFlowerPetalEdgeMaterial = new THREE.MeshBasicMaterial({ color: 0x386c96 });
+  const signFlowerVeinMaterial = new THREE.MeshBasicMaterial({
+    color: 0x4a88b6,
+    transparent: true,
+    opacity: 0.68,
+    depthWrite: false,
+  });
+  const signFlowerGlowMaterial = new THREE.MeshBasicMaterial({ color: 0x8fd7ff });
+  const signFlowerContactMaterial = new THREE.MeshBasicMaterial({
+    color: 0x3e3215,
+    transparent: true,
+    opacity: 0.2,
+    depthWrite: false,
+  });
+  const postFrontMaterial = new THREE.MeshLambertMaterial({ color: 0x744724 });
+  const postSideMaterial = new THREE.MeshLambertMaterial({ color: 0x4f2d18 });
+  const postTopMaterial = new THREE.MeshLambertMaterial({ color: 0x87552b });
+  const postBottomMaterial = new THREE.MeshLambertMaterial({ color: 0x2f1b10 });
+  const textMaterial = new THREE.MeshBasicMaterial({ color: 0x161a10 });
+
+  const hitMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const board = new THREE.Mesh(new THREE.BoxGeometry(1.36, 0.44, 0.035), hitMaterial);
+  board.position.y = 0.92;
+  board.castShadow = true;
+  board.receiveShadow = true;
+  board.userData.sceneNavRoot = group;
+
+  const boardOutline = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.58, 0.09), outlineMaterial);
+  boardOutline.position.copy(board.position);
+  boardOutline.position.z -= 0.012;
+
+  const plankSpecs = [
+    { y: 1.05, h: 0.16, x: -0.012, rot: 0.014, mat: boardMaterial },
+    { y: 0.91, h: 0.15, x: 0.016, rot: -0.01, mat: boardDarkMaterial },
+    { y: 0.77, h: 0.15, x: -0.018, rot: 0.012, mat: boardMaterial },
+  ];
+  const planks = plankSpecs.map(({ y, h, x, rot, mat }) => {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(1.34, h, 0.085), mat);
+    plank.position.set(x, y, 0.01);
+    plank.rotation.z = rot;
+    plank.castShadow = true;
+    plank.receiveShadow = true;
+    return plank;
+  });
+
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.7, 0.12), [
+    postSideMaterial,
+    postSideMaterial,
+    postTopMaterial,
+    postBottomMaterial,
+    postFrontMaterial,
+    postSideMaterial,
+  ]);
+  post.position.y = 0.35;
+  post.castShadow = true;
+  post.receiveShadow = true;
+
+  const postShadow = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.62, 0.01), postBottomMaterial);
+  postShadow.position.set(0.042, 0.34, 0.066);
+  postShadow.rotation.z = -0.035;
+
+  const postHighlight = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.54, 0.01), postTopMaterial);
+  postHighlight.position.set(-0.035, 0.39, 0.067);
+  postHighlight.rotation.z = 0.025;
+
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.08, 0.1), outlineMaterial);
+  cap.position.set(0, 1.19, -0.004);
+
+  const grain = [
+    [ -0.46, 1.08, 0.066, 0.34, 0.012, 0.012 ],
+    [ 0.08, 1.02, 0.066, 0.42, 0.01, -0.006 ],
+    [ -0.35, 0.92, 0.066, 0.28, 0.01, -0.008 ],
+    [ 0.3, 0.88, 0.066, 0.36, 0.012, 0.01 ],
+    [ -0.08, 0.78, 0.066, 0.52, 0.01, 0.006 ],
+  ].map(([ x, y, z, sx, sy, rot ]) => {
+    const mark = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), grainMaterial);
+    mark.position.set(x, y, z);
+    mark.scale.set(sx, sy, 0.008);
+    mark.rotation.z = rot;
+    return mark;
+  });
+
+  const chips = [
+    [ -0.71, 1.02, 0.068, 0.08, 0.045, 0.2 ],
+    [ 0.68, 0.78, 0.068, 0.07, 0.04, -0.15 ],
+    [ 0.55, 1.13, 0.068, 0.06, 0.035, 0.4 ],
+  ].map(([ x, y, z, sx, sy, rot ]) => {
+    const chip = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), outlineMaterial);
+    chip.position.set(x, y, z);
+    chip.scale.set(sx, sy, 0.012);
+    chip.rotation.z = rot;
+    return chip;
+  });
+
+  const makeIvyStem = (points) => {
+    const curve = new THREE.CatmullRomCurve3(points.map(([x, y, z = 0.082]) => new THREE.Vector3(x, y, z)));
+    const stem = new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.012, 5, false), leafDarkMaterial);
+    stem.castShadow = true;
+    stem.receiveShadow = true;
+    return stem;
+  };
+
+  const leafShape = new THREE.Shape();
+  leafShape.moveTo(0, 0.09);
+  leafShape.bezierCurveTo(-0.085, 0.055, -0.09, -0.035, 0, -0.105);
+  leafShape.bezierCurveTo(0.09, -0.035, 0.085, 0.055, 0, 0.09);
+  const leafGeometry = new THREE.ExtrudeGeometry(leafShape, {
+    depth: 0.012,
+    bevelEnabled: true,
+    bevelThickness: 0.004,
+    bevelSize: 0.003,
+    bevelSegments: 1,
+  });
+  const leafOutlineGeometry = leafGeometry.clone();
+
+  const makeLeaf = (x, y, scale, rot, mat = leafMaterial, tiltX = 0.18, tiltY = 0) => {
+    const leafGroup = new THREE.Group();
+    const outline = new THREE.Mesh(leafOutlineGeometry, outlineMaterial);
+    outline.position.z = 0.078;
+    outline.scale.set(scale * 1.16, scale * 1.16, 1);
+    const leaf = new THREE.Mesh(leafGeometry, mat);
+    leaf.position.z = 0.09;
+    leaf.scale.set(scale, scale, 1);
+    leaf.castShadow = true;
+    leaf.receiveShadow = true;
+    leafGroup.position.set(x, y, 0);
+    leafGroup.rotation.set(tiltX, tiltY, rot);
+    leafGroup.add(outline, leaf);
+    return leafGroup;
+  };
+
+  const signFlowerPetalShape = new THREE.Shape();
+  signFlowerPetalShape.moveTo(0, 0.012);
+  signFlowerPetalShape.bezierCurveTo(0.055, 0.036, 0.076, 0.1, 0, 0.13);
+  signFlowerPetalShape.bezierCurveTo(-0.076, 0.1, -0.055, 0.036, 0, 0.012);
+  const signFlowerPetalGeometry = new THREE.ExtrudeGeometry(signFlowerPetalShape, {
+    depth: 0.008,
+    bevelEnabled: true,
+    bevelThickness: 0.002,
+    bevelSize: 0.002,
+    bevelSegments: 1,
+  });
+  const signFlowerCenterGeometry = new THREE.SphereGeometry(0.035, 10, 6);
+  const signFlowerGlowGeometry = new THREE.SphereGeometry(0.04, 8, 4);
+  const signFlowerContactGeometry = new THREE.CircleGeometry(0.13, 18);
+  const signFlowerVeinGeometry = new THREE.BoxGeometry(0.008, 0.075, 0.004);
+
+  const makeSignFlower = (x, y, scale, rot = 0, inDelay = 0, {
+    z = 0.112,
+    tiltX = 0,
+    tiltY = 0,
+    stemLength = null,
+  } = {}) => {
+    const flower = new THREE.Group();
+    flower.userData.baseScale = scale;
+    flower.userData.inDelay = inDelay;
+    flower.position.set(x, y, z);
+    flower.rotation.set(tiltX, tiltY, rot);
+    flower.visible = false;
+    flower.scale.setScalar(scale);
+
+    const localStemLength = stemLength ?? THREE.MathUtils.clamp(
+      0.62 + (Math.sin(x * 23.1 + y * 17.3) + 1) * 0.28,
+      0.58,
+      1.16,
+    );
+    const bloomLift = (localStemLength - 0.8) * 0.035;
+    const stemGroup = new THREE.Group();
+    const bloomGroup = new THREE.Group();
+    stemGroup.scale.y = 0.001;
+    bloomGroup.position.y = bloomLift;
+    bloomGroup.scale.setScalar(0.001);
+    flower.userData.stemGroup = stemGroup;
+    flower.userData.bloomGroup = bloomGroup;
+
+    const contact = new THREE.Mesh(signFlowerContactGeometry, signFlowerContactMaterial);
+    contact.position.set(0.012, -0.012, -0.012);
+    contact.scale.set(1, 0.58, 1);
+    stemGroup.add(contact);
+
+    const stemCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-0.08 * localStemLength, -0.08 * localStemLength, -0.014),
+      new THREE.Vector3(-0.02 * localStemLength, -0.02 * localStemLength, -0.006),
+      new THREE.Vector3(0, 0.02 + bloomLift, 0),
+    ]);
+    const stem = new THREE.Mesh(new THREE.TubeGeometry(stemCurve, 7, 0.009, 5, false), leafDarkMaterial);
+    stem.castShadow = true;
+    stem.receiveShadow = true;
+    stemGroup.add(stem);
+
+    const flowerTone = scale < 0.25 ? 'small' : scale > 0.4 ? 'large' : 'mid';
+    const petalLightMaterial = flowerTone === 'small'
+      ? signFlowerSmallPetalMaterial
+      : flowerTone === 'large'
+        ? signFlowerLargePetalMaterial
+        : signFlowerPetalMaterial;
+    const petalDarkMaterial = flowerTone === 'small'
+      ? signFlowerSmallPetalShadeMaterial
+      : flowerTone === 'large'
+        ? signFlowerLargePetalShadeMaterial
+        : signFlowerPetalShadeMaterial;
+    const centerMaterial = flowerTone === 'small'
+      ? signFlowerSmallCenterMaterial
+      : flowerTone === 'large'
+        ? signFlowerLargeCenterMaterial
+        : signFlowerCenterMaterial;
+
+    for (let i = 0; i < 6; i += 1) {
+      const petalGroup = new THREE.Group();
+      petalGroup.rotation.z = (i / 6) * Math.PI * 2 + 0.08;
+      petalGroup.rotation.x = 0.18;
+      petalGroup.position.z = 0.004;
+
+      const petalEdge = new THREE.Mesh(signFlowerPetalGeometry, signFlowerPetalEdgeMaterial);
+      petalEdge.scale.set(1.16, 1.16, 0.8);
+      petalEdge.position.z = -0.004;
+      petalGroup.add(petalEdge);
+
+      const petal = new THREE.Mesh(
+        signFlowerPetalGeometry,
+        i % 2 === 0 ? petalLightMaterial : petalDarkMaterial,
+      );
+      petal.castShadow = true;
+      petal.receiveShadow = true;
+      petalGroup.add(petal);
+
+      const vein = new THREE.Mesh(signFlowerVeinGeometry, signFlowerVeinMaterial);
+      vein.position.set(0, 0.072, 0.012);
+      vein.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.08;
+      petalGroup.add(vein);
+      bloomGroup.add(petalGroup);
+    }
+
+    const center = new THREE.Mesh(signFlowerCenterGeometry, centerMaterial);
+    center.position.z = 0.018;
+    center.scale.set(1, 1, 0.55);
+    center.castShadow = true;
+    center.receiveShadow = true;
+    bloomGroup.add(center);
+
+    const glow = new THREE.Mesh(signFlowerGlowGeometry, signFlowerGlowMaterial);
+    glow.position.z = 0.016;
+    glow.scale.set(0.45, 0.45, 0.18);
+    bloomGroup.add(glow);
+
+    flower.add(stemGroup, bloomGroup);
+
+    return flower;
+  };
+
+  const hoverFlowers = [
+    // Dense top-left clump with a few flowers cresting over the edge.
+    makeSignFlower(-0.66, 1.12, 0.62, -0.35, 0),
+    makeSignFlower(-0.58, 1.17, 0.44, 0.34, 0.1, { z: 0.086, tiltX: -0.72 }),
+    makeSignFlower(-0.72, 1.03, 0.36, 0.18, 0.12),
+    makeSignFlower(-0.5, 1.2, 0.34, -0.78, 0.22, { z: 0.078, tiltX: -0.78 }),
+    makeSignFlower(-0.69, 1.18, 0.28, 0.9, 0.18, { z: 0.078, tiltX: -0.74 }),
+    makeSignFlower(-0.52, 1.06, 0.26, -0.18, 0.3),
+    makeSignFlower(-0.62, 0.96, 0.3, -0.48, 0.28),
+    makeSignFlower(-0.43, 1.13, 0.28, 0.82, 0.36, { z: 0.08, tiltX: -0.72 }),
+    makeSignFlower(-0.73, 0.88, 0.24, 0.42, 0.46),
+    makeSignFlower(-0.4, 0.98, 0.22, -1.0, 0.58),
+    makeSignFlower(-0.56, 0.83, 0.34, -0.15, 0.42),
+    makeSignFlower(-0.48, 0.78, 0.24, -0.62, 0.54),
+
+    // Smaller top-right clump, separated from the left cluster by a gap.
+    makeSignFlower(0.54, 1.12, 0.48, 0.28, 0.16),
+    makeSignFlower(0.64, 1.05, 0.34, -0.36, 0.24),
+    makeSignFlower(0.45, 1.08, 0.26, -0.82, 0.3),
+    makeSignFlower(0.58, 1.2, 0.34, 0.38, 0.34, { z: 0.084, tiltX: -0.72 }),
+    makeSignFlower(0.43, 1.23, 0.26, 0.95, 0.48, { z: 0.074, tiltX: -0.76 }),
+    makeSignFlower(0.69, 1.17, 0.24, 0.08, 0.56, { z: 0.078, tiltX: -0.7 }),
+    makeSignFlower(0.68, 0.94, 0.28, 0.58, 0.54),
+    makeSignFlower(0.55, 0.88, 0.22, -0.28, 0.66),
+
+    // Side clumps: wrapped onto the board thickness, not evenly strung along.
+    makeSignFlower(-0.79, 1.02, 0.44, -0.85, 0.18, { z: 0.034, tiltY: 1.08 }),
+    makeSignFlower(-0.83, 1.09, 0.28, 0.32, 0.32, { z: 0.024, tiltY: 1.18 }),
+    makeSignFlower(-0.84, 0.99, 0.24, -0.18, 0.38, { z: 0.018, tiltY: 1.26 }),
+    makeSignFlower(-0.8, 0.91, 0.28, 0.68, 0.5, { z: 0.02, tiltY: 1.22 }),
+    makeSignFlower(-0.76, 0.79, 0.24, -0.92, 0.7, { z: 0.022, tiltY: 1.2 }),
+    makeSignFlower(-0.82, 0.83, 0.2, 1.02, 0.78, { z: 0.018, tiltY: 1.26 }),
+    makeSignFlower(0.78, 0.98, 0.42, 0.58, 0.28, { z: 0.034, tiltY: -1.08 }),
+    makeSignFlower(0.82, 1.08, 0.28, -0.58, 0.42, { z: 0.024, tiltY: -1.18 }),
+    makeSignFlower(0.84, 1.0, 0.24, 0.18, 0.5, { z: 0.018, tiltY: -1.26 }),
+    makeSignFlower(0.76, 0.87, 0.3, -0.12, 0.62, { z: 0.026, tiltY: -1.14 }),
+    makeSignFlower(0.83, 0.82, 0.2, -0.94, 0.78, { z: 0.018, tiltY: -1.26 }),
+
+    // Sparse strays and post clumps, deliberately uneven.
+    makeSignFlower(-0.16, 1.22, 0.24, -1.08, 0.46, { z: 0.072, tiltX: -0.8 }),
+    makeSignFlower(0.18, 0.77, 0.22, 0.24, 0.74),
+    makeSignFlower(0.04, 1.18, 0.2, -0.44, 0.7, { z: 0.074, tiltX: -0.76 }),
+    makeSignFlower(-0.22, 0.79, 0.18, 0.92, 0.82),
+    makeSignFlower(-0.06, 0.68, 0.3, -0.6, 0.5, { z: 0.088, tiltY: 0.26 }),
+    makeSignFlower(0.04, 0.62, 0.26, 0.44, 0.58, { z: 0.09, tiltY: -0.28 }),
+    makeSignFlower(-0.005, 0.59, 0.22, -0.08, 0.62, { z: 0.094 }),
+    makeSignFlower(-0.075, 0.56, 0.22, 0.2, 0.66, { z: 0.086, tiltY: 0.42 }),
+    makeSignFlower(0.055, 0.46, 0.22, -0.78, 0.76, { z: 0.084, tiltY: -0.5 }),
+    makeSignFlower(-0.025, 0.42, 0.2, 0.54, 0.8, { z: 0.088, tiltY: 0.16 }),
+    makeSignFlower(-0.055, 0.34, 0.2, 0.86, 0.84, { z: 0.082, tiltY: 0.58 }),
+    makeSignFlower(0.04, 0.28, 0.18, -0.18, 0.9, { z: 0.08, tiltY: -0.62 }),
+    makeSignFlower(-0.01, 0.22, 0.16, -0.72, 0.94, { z: 0.078 }),
+  ];
+  group.userData.hoverFlowers = hoverFlowers;
+
+  const ivyStems = [
+    makeIvyStem([[-0.075, 0.2, 0.08], [-0.075, 0.3, 0.08]]),
+    makeIvyStem([[0.075, 0.32, -0.075], [0.075, 0.44, -0.075]]),
+    makeIvyStem([[-0.075, 0.46, 0.08], [-0.075, 0.58, 0.08]]),
+    makeIvyStem([[0.075, 0.6, -0.075], [0.075, 0.7, -0.075]]),
+    makeIvyStem([[-0.075, 0.7, 0.08], [-0.35, 0.73, 0.08], [-0.62, 0.76, 0.08], [-0.75, 0.9, 0.08], [-0.72, 1.08, 0.08]]),
+    makeIvyStem([[-0.72, 1.08, 0.08], [-0.62, 1.19, 0.08], [-0.46, 1.23, 0.08], [-0.24, 1.2, 0.08]]),
+  ];
+
+  const ivyLeaves = [
+    [-0.12, 0.28, 0.22, -0.8, leafDarkMaterial, 0.75, -0.45],
+    [0.13, 0.43, 0.23, 0.65, leafMaterial, 0.25, 0.5],
+    [-0.12, 0.56, 0.24, -0.35, leafDarkMaterial, 0.7, -0.42],
+    [0.12, 0.68, 0.2, 0.42, leafMaterial, 0.2, 0.45],
+    [-0.36, 0.74, 0.28, 0.75, leafMaterial, 0.28, 0.2],
+    [-0.62, 0.78, 0.32, -0.5, leafDarkMaterial, 0.52, -0.1],
+    [-0.76, 0.95, 0.34, 0.28, leafMaterial, 0.34, 0.18],
+    [-0.69, 1.12, 0.34, -0.9, leafDarkMaterial, 0.48, -0.18],
+    [-0.52, 1.22, 0.3, 0.18, leafMaterial, 0.26, 0.14],
+    [-0.3, 1.2, 0.26, -0.35, leafDarkMaterial, 0.42, -0.12],
+  ].map(([x, y, scale, rot, mat, tiltX, tiltY]) => makeLeaf(x, y, scale, rot, mat, tiltX, tiltY));
+
+  const mossClumps = [
+    [ -0.62, 1.2, 0.074, 0.16, 0.032, 0.026 ],
+    [ -0.46, 1.22, 0.076, 0.1, 0.024, 0.02 ],
+    [ 0.05, 0.58, 0.075, 0.08, 0.022, 0.02 ],
+  ].map(([ x, y, z, sx, sy, sz ]) => {
+    const moss = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 4), mossMaterial);
+    moss.position.set(x, y, z);
+    moss.scale.set(sx, sy, sz);
+    moss.castShadow = true;
+    moss.receiveShadow = true;
+    return moss;
+  });
+
+  const nailGeometry = new THREE.SphereGeometry(0.026, 8, 4);
+  const nails = [
+    [ -0.57, 1.05 ],
+    [ 0.56, 1.04 ],
+    [ -0.58, 0.78 ],
+    [ 0.55, 0.78 ],
+  ].map(([ x, y ]) => {
+    const nail = new THREE.Mesh(nailGeometry, outlineMaterial);
+    nail.position.set(x, y, 0.066);
+    nail.scale.z = 0.35;
+    nail.castShadow = true;
+    return nail;
+  });
+
+  const labelGeometry = new TextGeometry('ABOUT', {
+    font,
+    size: 0.18,
+    depth: 0.006,
+    curveSegments: 2,
+    bevelEnabled: false,
+  });
+  labelGeometry.computeBoundingBox();
+  labelGeometry.center();
+  const label = new THREE.Mesh(labelGeometry, textMaterial);
+  label.position.set(0, 0.89, 0.052);
+
+  const labelShadow = new THREE.Mesh(labelGeometry.clone(), outlineMaterial);
+  labelShadow.position.set(0.012, 0.878, 0.048);
+
+  group.add(
+    post,
+    postShadow,
+    postHighlight,
+    head,
+  );
+
+  head.add(
+    boardOutline,
+    cap,
+    ...planks,
+    board,
+    ...grain,
+    ...chips,
+    ...ivyStems,
+    ...mossClumps,
+    ...ivyLeaves,
+    ...hoverFlowers,
+    ...nails,
+    labelShadow,
+    label,
+  );
+
+  sceneNavHitTargets.push(board);
+  return group;
 }
 
 function createGlyphDistanceField(masks, bounds, spacing = 0.04) {
@@ -758,6 +1787,12 @@ async function buildFontScene(font) {
     signGroup.position.set(0, GROUND_Y, TEXT_CENTER_Z);
 
     textGroup.add(signGroup);
+    sceneNavGroup.clear();
+    sceneNavHitTargets.length = 0;
+    const sceneNavSign = createSceneNavSign(font);
+    sceneNavGroup.userData.hoverState = sceneNavSign.userData.hoverState;
+    sceneNavGroup.add(sceneNavSign);
+    updateSceneNavPlacement();
 
     fontPhaseStartedAt = performance.now();
     const craftyMask = createGlyphMask(
@@ -872,7 +1907,7 @@ async function buildFontScene(font) {
       dapple: tuftDappleConfig,
     });
     recordStartupTiming('letter fill moss construction', fontPhaseStartedAt);
-    scene.add(fillTop.mesh);
+    if (!DEBUG_HIDE_FOLIAGE) scene.add(fillTop.mesh);
     fillTuftCount = fillTop.mesh.count;
 
     const applyWindAvoidance = (blanket) => blanket.setWindAvoidance((x, z) => {
@@ -907,7 +1942,104 @@ function resize() {
   const height = sceneStage.clientHeight;
 
   fitCameraToText(width / height);
+  updateSceneNavPlacement();
+  if (overlayFocusDistance && requestedOverlayDofAmount > 0) {
+    overlayFocusDistance.value = getOverlayFocusDistance();
+  }
+  // Recompute the pixel-budget cap for the new stage size, then re-apply the
+  // runtime adaptive scale on top of it so a resize never undoes a back-off.
+  basePixelRatio = pixelRatioForStage();
+  applyPixelRatio();
   renderer.setSize(width, height, false);
+}
+
+// --- Adaptive quality controller --------------------------------------------
+// `basePixelRatio` is the resolution-independent ceiling from the pixel budget;
+// `adaptiveScale` (0..1) is the runtime back-off multiplied on top of it. When
+// resolution alone can't hold the target frame rate we drop to a smaller shadow
+// map as a second lever. Bloom is left untouched so the look is preserved.
+let basePixelRatio = pixelRatioForStage();
+let adaptiveScale = 1;
+const ADAPTIVE_SCALE_MIN = MIN_PIXEL_RATIO / MAX_PIXEL_RATIO;
+const ADAPTIVE_SCALE_STEP = 0.12;
+const TARGET_FPS = 50;
+const RECOVER_FPS = 58;
+const SHADOW_MAP_HIGH = 2048;
+const SHADOW_MAP_LOW = 1024;
+let shadowMapReduced = false;
+
+function applyPixelRatio() {
+  const ratio = THREE.MathUtils.clamp(
+    basePixelRatio * adaptiveScale,
+    MIN_PIXEL_RATIO,
+    MAX_PIXEL_RATIO,
+  );
+  if (Math.abs(renderer.getPixelRatio() - ratio) < 0.001) return;
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(sceneStage.clientWidth, sceneStage.clientHeight, false);
+}
+
+function setShadowMapSize(size) {
+  if (sun.shadow.mapSize.width === size) return;
+  sun.shadow.mapSize.set(size, size);
+  // Force the shadow map texture to be recreated at the new resolution.
+  sun.shadow.map?.dispose();
+  sun.shadow.map = null;
+  shadowMapReduced = size === SHADOW_MAP_LOW;
+}
+
+// Rolling FPS measurement with hysteresis. We only act on a sustained trend
+// (a full sampling window below/above threshold) so a single janky frame —
+// e.g. the GC pause when a flower generation dies — never triggers a step.
+const FPS_WINDOW_MS = 1000;
+let fpsFrames = 0;
+let fpsWindowStart = 0;
+let consecutiveSlow = 0;
+let consecutiveFast = 0;
+
+function monitorPerformance(nowMs) {
+  if (fpsWindowStart === 0) {
+    fpsWindowStart = nowMs;
+    return;
+  }
+  fpsFrames += 1;
+  const elapsed = nowMs - fpsWindowStart;
+  if (elapsed < FPS_WINDOW_MS) return;
+
+  const fps = (fpsFrames * 1000) / elapsed;
+  fpsFrames = 0;
+  fpsWindowStart = nowMs;
+
+  if (fps < TARGET_FPS) {
+    consecutiveSlow += 1;
+    consecutiveFast = 0;
+    // Lever 1: shed resolution first (cheapest visual cost on a soft scene).
+    if (adaptiveScale > ADAPTIVE_SCALE_MIN + 0.001) {
+      adaptiveScale = Math.max(ADAPTIVE_SCALE_MIN, adaptiveScale - ADAPTIVE_SCALE_STEP);
+      applyPixelRatio();
+    } else if (!shadowMapReduced && consecutiveSlow >= 2) {
+      // Lever 2: at the resolution floor and still slow — shrink the shadow map.
+      setShadowMapSize(SHADOW_MAP_LOW);
+    }
+  } else if (fps > RECOVER_FPS) {
+    consecutiveFast += 1;
+    consecutiveSlow = 0;
+    // Recover conservatively, and only after a few good windows, so we don't
+    // bounce between quality levels right at the threshold.
+    if (consecutiveFast >= 3) {
+      if (shadowMapReduced) {
+        setShadowMapSize(SHADOW_MAP_HIGH);
+        consecutiveFast = 0;
+      } else if (adaptiveScale < 1 - 0.001) {
+        adaptiveScale = Math.min(1, adaptiveScale + ADAPTIVE_SCALE_STEP);
+        applyPixelRatio();
+        consecutiveFast = 0;
+      }
+    }
+  } else {
+    consecutiveSlow = 0;
+    consecutiveFast = 0;
+  }
 }
 
 function updateCamera() {
@@ -927,6 +2059,14 @@ const FLOWER_LEVEL_REVISITS = [0, 1, 1, 2, 3];
 const FLOWER_SPAWN_STEP = 0.18;
 const TEXT_FLOWER_BAND = 0.5;
 const TEXT_FLOWER_EDGE_OFFSET = 0.2;
+const SIGN_FLOWER_KEEP_OUT_X = 0.92;
+const SIGN_FLOWER_KEEP_OUT_NEAR_Z = 0.35;
+const SIGN_FLOWER_KEEP_OUT_FAR_Z = 0.95;
+const SIGN_FLOWER_AVOID_RADIUS = 1.65;
+const SIGN_FLOWER_SMALL_RADIUS = 0.95;
+const SIGN_FLOWER_FULL_RADIUS = 2.1;
+const SIGN_FLOWER_RADIAL_WIND_RADIUS = 3.45;
+const SIGN_FLOWER_RADIAL_WIND_STRENGTH = 0.16;
 const flowerVisitGrid = new Map();
 let activeFlowerCell = null;
 let lastFlowerSpawn = null;
@@ -992,6 +2132,13 @@ function leaveFlowerArea() {
 }
 
 function spawnFlowerAtPointer(event) {
+  const sceneNavHit = getSceneNavHit(event);
+  if (!sceneNavHit && sceneNavHoverPinned) sceneNavHoverPinned = false;
+  setSceneNavHover(sceneNavHit?.object.userData.sceneNavRoot ?? null, sceneNavHit);
+  if (sceneNavHit) {
+    leaveFlowerArea();
+    return;
+  }
   if (!flowerPatch) return;
 
   const rect = canvas.getBoundingClientRect();
@@ -1003,6 +2150,10 @@ function spawnFlowerAtPointer(event) {
   const { x, z } = ground;
 
   if (!isInInitialMoss(x, z)) {
+    leaveFlowerArea();
+    return;
+  }
+  if (isInsideSceneNavFlowerKeepOut(x, z)) {
     leaveFlowerArea();
     return;
   }
@@ -1028,6 +2179,13 @@ function spawnFlowerAtPointer(event) {
     ? Math.min(0.65, 0.25 + levelsBelowPeak * 0.12)
     : 0;
   const legacyStage = visit.peakCount - 1;
+  const signDx = x - sceneNavGroup.position.x;
+  const signDz = z - sceneNavGroup.position.z;
+  const signDistance = Math.sqrt(signDx * signDx + signDz * signDz);
+  const signStageT = THREE.MathUtils.smoothstep(signDistance, SIGN_FLOWER_SMALL_RADIUS, SIGN_FLOWER_FULL_RADIUS);
+  const signStageCap = Math.floor(THREE.MathUtils.lerp(0, FLOWER_LEVELS - 1, signStageT));
+  const growthStage = Math.min(visit.count - 1, signStageCap);
+  const rememberedStage = Math.min(legacyStage, signStageCap);
   let planted;
   if (growsOnTextBoundary) {
     const edgeX = x - rockEdge.x * rockEdge.distance;
@@ -1035,12 +2193,12 @@ function spawnFlowerAtPointer(event) {
     planted = flowerPatch.scatterBoundary(
       edgeX + rockEdge.x * TEXT_FLOWER_EDGE_OFFSET,
       edgeZ + rockEdge.z * TEXT_FLOWER_EDGE_OFFSET,
-      visit.count - 1,
+      growthStage,
       legacyChance,
-      legacyStage,
+      rememberedStage,
     );
   } else {
-    planted = flowerPatch.scatter(x, z, visit.count - 1, legacyChance, legacyStage);
+    planted = flowerPatch.scatter(x, z, growthStage, legacyChance, rememberedStage);
   }
   if (planted.length === 0) return;
 
@@ -1078,8 +2236,25 @@ function spawnFlowerAtPointer(event) {
 
 canvas.addEventListener('pointermove', spawnFlowerAtPointer);
 canvas.addEventListener('pointerenter', spawnFlowerAtPointer);
-canvas.addEventListener('pointerleave', leaveFlowerArea);
-canvas.addEventListener('pointercancel', leaveFlowerArea);
+canvas.addEventListener('pointerleave', () => {
+  if (!sceneNavHoverPinned) setSceneNavHover(null);
+  leaveFlowerArea();
+});
+canvas.addEventListener('pointercancel', () => {
+  sceneNavHoverPinned = false;
+  setSceneNavHover(null);
+  leaveFlowerArea();
+});
+canvas.addEventListener('click', (event) => {
+  const sceneNavHit = getSceneNavHit(event);
+  const sceneNavRoot = sceneNavHit?.object.userData.sceneNavRoot;
+  if (!sceneNavRoot) return;
+
+  event.preventDefault();
+  sceneNavHoverPinned = true;
+  setSceneNavHover(sceneNavRoot, sceneNavHit);
+  triggerOverlayById(sceneNavRoot.userData.overlayId);
+});
 
 // Bloom post-processing: scene → threshold bloom added back over the original.
 // Only the bright emissive flower blooms clear the threshold, so they throw a
@@ -1092,17 +2267,122 @@ const sceneColor = scenePass.getTextureNode('output');
 // lighting is balanced (nothing is over-driven past ~1.0 any more). Tasteful,
 // not a halo machine — strength, radius, threshold.
 const bloomPass = bloom(sceneColor, 0.1, 0.4, 0.8);
-postProcessing.outputNode = sceneColor.add(bloomPass);
+overlayDofAperture = uniform(OVERLAY_DOF_APERTURE * requestedOverlayDofAmount);
+overlayDofMaxBlur = uniform(OVERLAY_DOF_MAX_BLUR * requestedOverlayDofAmount);
+overlayBloomAmount = uniform(1);
+overlaySceneDim = uniform(0);
+requestedOverlayFocusDistance = getOverlayFocusDistance();
+overlayFocusDistance = uniform(requestedOverlayFocusDistance);
+// Composite bloom into the scene BEFORE the DOF blur, not after. The bloom is
+// thresholded so only the bright emissive petals clear it — adding that sharp
+// bloom on top of an already-blurred scene laid a crisp rim over soft petals,
+// reading as a halo around every petal in the nav overlays. Feeding scene+bloom
+// into DOF blurs the petal bloom together with the petals, so it softens with
+// them. Closed (DOF at zero blur) this is a passthrough of scene+bloom — the
+// look outside overlays is unchanged.
+const bloomComposite = sceneColor.add(bloomPass.mul(overlayBloomAmount));
+// Time fade: how open the overlay is (0 closed → 1 open). Zero when closed, so
+// the normal view is untouched; ramps in with the open tween. Also used below to
+// bypass the DOF render targets while closed, avoiding any one-frame warm-up
+// softness from the multi-pass DOF pipeline.
+const overlayOpenAmount = clamp(overlayDofMaxBlur.div(OVERLAY_DOF_MAX_BLUR), 0, 1);
+// Depth-weighted DOF (local fork, see dofWeighted.js): each tap is weighted by
+// its OWN circle of confusion, so a blurry background bleeds across the edge of
+// a sharper petal instead of leaving it crisp. Takes the raw depth texture
+// (sampleable at tap UVs) plus camera near/far rather than a per-fragment viewZ.
+const sceneDepth = scenePass.getTextureNode('depth');
+const overlayDofWidePass = dofWeighted(
+  bloomComposite,
+  sceneDepth,
+  overlayFocusDistance,
+  overlayDofAperture,
+  overlayDofMaxBlur,
+  camera.near,
+  camera.far,
+);
+const overlayDofFillPass = dofWeighted(
+  bloomComposite,
+  sceneDepth,
+  overlayFocusDistance,
+  overlayDofAperture.mul(0.58),
+  overlayDofMaxBlur.mul(0.72),
+  camera.near,
+  camera.far,
+);
+const overlayDofPass = mix(overlayDofWidePass, overlayDofFillPass, 0.38);
+const overlaySceneSoftened = mix(bloomComposite, overlayDofPass, overlayOpenAmount);
+
+// Depth-driven grade: the further a fragment sits from the focus plane, the
+// darker and more contrasty it gets — so the blurred backdrop recedes behind
+// the nav overlay instead of just going soft.
+//
+// Two separate signals drive it, and keeping them separate is the whole point:
+//   • SPATIAL falloff — how far this fragment is from focus, in world units.
+//     smoothstep over a fixed distance band gives a real near→far gradient.
+//     (The earlier version divided by maxBlur, but the DOF node caps blur at
+//     maxBlur, so that ratio saturated to 1 across the whole backdrop — the
+//     grade had no gradient and slammed on everywhere at once.)
+//   • TIME fade — how far the overlay has opened. overlayDofMaxBlur tweens from
+//     0 → OVERLAY_DOF_MAX_BLUR, so that ratio IS the 0..1 open amount. We must
+//     gate on it explicitly: it does NOT fall out of the spatial term (aperture
+//     and maxBlur both scale with the open amount, so they cancel in any ratio
+//     of the two — which is why the grade used to appear at full strength the
+//     instant the blur began instead of fading in).
+const overlayViewZ = scenePass.getViewZNode('depth');
+// World-unit distance from the focus plane, faded across this band. Tune the
+// band to the scene's depth so the near edge of the backdrop reads lighter than
+// the far edge rather than the whole thing grading uniformly.
+// Camera sits ~17 units from the focused text and the visible backdrop only
+// runs a few units deeper, so the defocus distance |focus+viewZ| across the
+// scene is single-digit — NOT the 16+ the band first assumed (which kept the
+// spatial term pinned near 0, so the grade never showed). Band tuned to that
+// real spread: starts grading almost immediately off the focus plane, full by
+// ~6 units back.
+const OVERLAY_GRADE_NEAR = 0.5; // below this defocus distance: no grade
+const OVERLAY_GRADE_FAR = 6.0; // at/after this: full grade
+const overlayDefocusDist = abs(overlayFocusDistance.add(overlayViewZ));
+const overlaySpatial = smoothstep(OVERLAY_GRADE_NEAR, OVERLAY_GRADE_FAR, overlayDefocusDist);
+const overlayDefocus = overlaySpatial.mul(overlayOpenAmount);
+// How hard the grade pushes at full defocus. darken multiplies brightness down;
+// contrast pushes colour away from a low pivot. Both lerp from 1.0 (no change)
+// toward these floors by overlayDefocus.
+const OVERLAY_DEPTH_DARKEN = 1.0; // far backdrop keeps ~75% brightness
+const OVERLAY_DEPTH_CONTRAST = 1.0; // far backdrop gains ~8% contrast
+const overlayDarken = mix(uniform(1), uniform(OVERLAY_DEPTH_DARKEN), overlayDefocus);
+const overlayContrast = mix(uniform(1), uniform(OVERLAY_DEPTH_CONTRAST), overlayDefocus);
+// Pivot sits near the dark backdrop's own tone, not mid-grey, so the contrast
+// push doesn't crush the already-dark moss/rock toward black.
+const overlayPivot = 0.25;
+const overlayGradedRgb = overlaySceneSoftened.rgb
+  .sub(overlayPivot)
+  .mul(overlayContrast)
+  .add(overlayPivot)
+  .mul(overlayDarken)
+  .max(0);
+// Separate whole-scene dim, composed AFTER the depth grade. Depth-agnostic and
+// driven by its own uniform/tween, so it darkens the entire frame uniformly as
+// the overlay opens without touching the grade's math. One scalar multiply —
+// the cheapest per-frame lever in the pipeline (single uniform write, no graph
+// recompile). lerp 1 → OVERLAY_SCENE_DIM by overlaySceneDim.
+const overlayDimFactor = mix(uniform(1), uniform(OVERLAY_SCENE_DIM), overlaySceneDim);
+postProcessing.outputNode = vec4(overlayGradedRgb.mul(overlayDimFactor), overlaySceneSoftened.a);
 recordStartupTiming('post-processing setup', startupPhaseStartedAt);
 
-function animate() {
+function animate(timeMs) {
   updateCamera();
   const dt = clock.getDelta();
-  if (flowerPatch) flowerPatch.update(dt);
+  if (flowerPatch) {
+    updateSceneNavPointWind();
+    flowerPatch.update(dt);
+  }
   mossTop.update(dt);
   growthShoots.update(dt);
   if (fillTop) fillTop.update(dt);
   postProcessing.render();
+  // Adaptive quality controller temporarily disabled — the runtime resolution /
+  // shadow-map back-off is off so the scene renders at a fixed quality. Re-enable
+  // by restoring this call:
+  //   monitorPerformance(timeMs ?? clock.elapsedTime * 1000);
 }
 
 function updateStats() {
@@ -1145,6 +2425,10 @@ async function start() {
 
     setLoaderMessage('Almost ready…');
     await timeStartupAsync('first post-processed frame', () => postProcessing.renderAsync());
+    await timeStartupAsync('post-processing warm-up', async () => {
+      await postProcessing.renderAsync();
+      await postProcessing.renderAsync();
+    });
   } catch (error) {
     showLoaderError('The scene failed to load.');
     console.error(error);

@@ -497,6 +497,11 @@ export function createFlowerPatch({
   const u_windTurb = uniform(windTurbulence);
   const u_windX = uniform(WIND.x);
   const u_windZ = uniform(WIND.y);
+  const u_pointWindX = uniform(0);
+  const u_pointWindZ = uniform(0);
+  const u_pointWindRadius = uniform(1);
+  const u_pointWindStrength = uniform(0);
+  const pointWind = { x: 0, z: 0, radius: 1, strength: 0 };
 
   const rotateX = (position, angle) => {
     const c = cos(angle);
@@ -556,8 +561,18 @@ export function createFlowerPatch({
     const crossBend = response.mul(crossWave).mul(0.055)
       .mul(u_windScale).mul(u_windTurb).div(HEAD_Y);
 
-    const worldWindX = u_windX.mul(windBend).sub(u_windZ.mul(crossBend));
-    const worldWindZ = u_windZ.mul(windBend).add(u_windX.mul(crossBend));
+    const radialX = rootX.sub(u_pointWindX);
+    const radialZ = rootZ.sub(u_pointWindZ);
+    const radialDistanceSquared = radialX.mul(radialX).add(radialZ.mul(radialZ)).add(0.0001);
+    const radialDistance = pow(radialDistanceSquared, 0.5);
+    const radialFalloff = smoothstep(0, u_pointWindRadius, radialDistance).oneMinus();
+    const radialResponse = response.add(0.35).mul(smoothstep(0.001, 0.002, response));
+    const radialBend = radialResponse.mul(radialFalloff).mul(u_pointWindStrength).div(HEAD_Y);
+
+    const worldRadialX = radialX.div(radialDistance).mul(radialBend);
+    const worldRadialZ = radialZ.div(radialDistance).mul(radialBend);
+    const worldWindX = u_windX.mul(windBend).sub(u_windZ.mul(crossBend)).add(worldRadialX);
+    const worldWindZ = u_windZ.mul(windBend).add(u_windX.mul(crossBend)).add(worldRadialZ);
 
     const c = cos(swayData.w);
     const s = sin(swayData.w);
@@ -1493,8 +1508,16 @@ export function createFlowerPatch({
     const rotationSine = Math.sin(flower.rotation);
     const worldWindX = WIND.x * windBend - WIND.y * crossBend;
     const worldWindZ = WIND.y * windBend + WIND.x * crossBend;
-    const localWindX = worldWindX * c + worldWindZ * rotationSine;
-    const localWindZ = -worldWindX * rotationSine + worldWindZ * c;
+    const radialX = flower.x - pointWind.x;
+    const radialZ = flower.z - pointWind.z;
+    const radialDistance = Math.sqrt(radialX * radialX + radialZ * radialZ + 0.0001);
+    const radialT = 1 - THREE.MathUtils.smoothstep(radialDistance, 0, pointWind.radius);
+    const radialResponse = flower.windResponse > 0.001 ? flower.windResponse + 0.35 : 0;
+    const radialBend = radialResponse * radialT * pointWind.strength / HEAD_Y;
+    const combinedWindX = worldWindX + (radialX / radialDistance) * radialBend;
+    const combinedWindZ = worldWindZ + (radialZ / radialDistance) * radialBend;
+    const localWindX = combinedWindX * c + combinedWindZ * rotationSine;
+    const localWindZ = -combinedWindX * rotationSine + combinedWindZ * c;
     const tiltX = Math.cos(flower.tiltDir) * flower.tilt;
     const tiltZ = Math.sin(flower.tiltDir) * flower.tilt;
     eScratch.set(tiltX + localWindZ, flower.rotation, tiltZ - localWindX);
@@ -1883,6 +1906,17 @@ export function createFlowerPatch({
   return {
     object: group,
     flowers,
+    setPointWind({ x = 0, z = 0, radius = 1, strength = 0 } = {}) {
+      pointWind.x = x;
+      pointWind.z = z;
+      pointWind.radius = Math.max(0.001, radius);
+      pointWind.strength = strength;
+      u_pointWindX.value = pointWind.x;
+      u_pointWindZ.value = pointWind.z;
+      u_pointWindRadius.value = pointWind.radius;
+      u_pointWindStrength.value = pointWind.strength;
+    },
+
     scatter(x, z, growthStage = 0, legacyChance = 0, legacyStage = growthStage) {
       return scatterFromFamilies(
         x, z, growthStage, FIELD_FAMILIES, fieldColony, 0.85, 3, legacyChance, legacyStage,

@@ -56,7 +56,7 @@ function pushCurvedLeaf({ positions, colors, indices, palette, root, right, forw
   }
 }
 
-function makeLeafClumpGeometry() {
+function makeLeafClumpGeometry(blades = 12) {
   const positions = [];
   const colors = [];
   const indices = [];
@@ -67,8 +67,8 @@ function makeLeafClumpGeometry() {
     new THREE.Color(0x91ad45),
   ];
 
-  for (let i = 0; i < 12; i += 1) {
-    const angle = (i / 12) * Math.PI * 2;
+  for (let i = 0; i < blades; i += 1) {
+    const angle = (i / blades) * Math.PI * 2;
     const height = 0.5 + (i % 4) * 0.075;
     const width = 0.2 + (i % 3) * 0.028;
     const length = 0.08 + (i % 5) * 0.02;
@@ -453,6 +453,10 @@ export function createTuftBlanket({
   windRange = [0.018, 0.08],
   animated = true,
   shape = 'upright',
+  // Blades per upright tuft. 8 (down from the geometry default of 12) is a
+  // deliberate, stable thinning: same tuft spacing/density, just wispier clumps.
+  // Cheaper (fewer blade fragments + less overdraw) and the look we settled on.
+  blades = 8,
   yOffset = 0.04,
   hueRange = [0.24, 0.34],
   saturationRange = [0.5, 0.78],
@@ -473,7 +477,7 @@ export function createTuftBlanket({
   const cellsZ = Math.ceil(depth / spacing);
   const halfWidth = width * 0.5;
   const halfDepth = depth * 0.5;
-  const geometry = shape === 'mat' ? makeMossMatGeometry() : makeLeafClumpGeometry();
+  const geometry = shape === 'mat' ? makeMossMatGeometry() : makeLeafClumpGeometry(blades);
   const material = createWindMaterial({
     roughness,
     emissive,
