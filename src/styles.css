@@ -289,7 +289,7 @@
     will-change: opacity, transform;
   }
 
-  .overlay-content h1 {
+  .overlay-content h2 {
     margin: 0 0 1rem;
     font-family: 'Fraunces', 'Inter', ui-serif, Georgia, serif;
     font-size: clamp(2rem, 7vw, 4.4rem);

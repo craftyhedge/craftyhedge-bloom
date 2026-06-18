@@ -893,7 +893,7 @@ function setSceneNavHover(next, hit = null) {
   gsap.killTweensOf(state);
   gsap.to(state, {
     amount: next ? 1 : 0,
-    duration: next ? 1.35 : 1.05,
+    duration: next ? 0.6 : 0.5,
     ease: next ? 'power2.out' : 'sine.inOut',
     onUpdate: () => {
       updateSceneNavHoverFlowers(root);
@@ -905,6 +905,10 @@ function setSceneNavHover(next, hit = null) {
 function setSceneNavHoverOrigin(root, worldPoint) {
   const hoverFlowers = root?.userData.hoverFlowers;
   if (!hoverFlowers) return;
+
+  // The board shader sweep radiates from the world-space hit point.
+  const boardUniforms = root.userData.boardUniforms;
+  if (boardUniforms) boardUniforms.uHoverOrigin.value.copy(worldPoint);
 
   sceneNavHoverOrigin.copy(worldPoint);
   root.worldToLocal(sceneNavHoverOrigin);
@@ -938,6 +942,9 @@ function updateSceneNavHoverFlowers(root) {
   const state = root?.userData.hoverState;
   const hoverFlowers = root?.userData.hoverFlowers;
   if (!state || !hoverFlowers) return;
+
+  const boardUniforms = root.userData.boardUniforms;
+  if (boardUniforms) boardUniforms.uHoverProgress.value = state.amount;
 
   for (const flower of hoverFlowers) {
     const delay = flower.userData.activeInDelay ?? flower.userData.inDelay;
@@ -1207,9 +1214,30 @@ function createSceneNavSign(labelFontFamily) {
   };
 
   const outlineMaterial = new THREE.MeshBasicMaterial({ color: 0x10130b });
-  const woodEdgeMaterial = new THREE.MeshLambertMaterial({ color: 0x241409 });
   const boardMaterial = new THREE.MeshLambertMaterial({ color: 0x5a351c });
   const boardDarkMaterial = new THREE.MeshLambertMaterial({ color: 0x432512 });
+
+  // Hover washes the back board (the edge layer behind the planks) toward a warm
+  // off-white in a sweep that radiates from the world-space point under the
+  // cursor. The flowers already bloom from that origin; this matches them with a
+  // TSL colorNode whose radial smoothstep is driven from hover-state uniforms.
+  const boardHoverOrigin = uniform(new THREE.Vector3());
+  const boardHoverProgress = uniform(0);
+  const boardHoverReach = uniform(2.6);
+  group.userData.boardUniforms = {
+    uHoverOrigin: boardHoverOrigin,
+    uHoverProgress: boardHoverProgress,
+  };
+  const woodEdgeMaterial = new THREE.MeshLambertMaterial();
+  const boardBaseColor = color(0x241409);
+  const boardHoverColor = color(0x968a70);
+  // Front of the sweep advances with hover progress; the trailing 0.35 unit band
+  // is the soft edge. At progress 0 the front sits at 0, so smoothstep yields 0
+  // everywhere (no wash) without needing an explicit guard.
+  const boardSweepFront = boardHoverProgress.mul(boardHoverReach.add(0.35));
+  const boardDist = positionWorld.distance(boardHoverOrigin);
+  const boardWash = smoothstep(boardSweepFront, boardSweepFront.sub(0.35), boardDist);
+  woodEdgeMaterial.colorNode = mix(boardBaseColor, boardHoverColor, boardWash);
   const grainMaterial = new THREE.MeshBasicMaterial({ color: 0x22130a });
   const mossMaterial = new THREE.MeshLambertMaterial({ color: 0x3f7f2a });
   const leafMaterial = new THREE.MeshLambertMaterial({ color: 0x628e3a });
