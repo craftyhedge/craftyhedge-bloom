@@ -371,6 +371,25 @@
     .overlay-panel {
       height: 100%;
     }
+
+    .overlay-panel__close {
+      position: absolute;
+      top: 0.8rem;
+      left: 50%;
+      right: auto;
+      margin: 0;
+      padding: 0.34rem 0.58rem;
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      transform: translateX(-50%);
+    }
+
+    .overlay-content {
+      display: grid;
+      min-height: 100%;
+      align-items: center;
+      padding: clamp(1rem, 5vw, 1.5rem);
+    }
   }
 }
 
