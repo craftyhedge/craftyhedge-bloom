@@ -2070,6 +2070,7 @@ const SIGN_FLOWER_RADIAL_WIND_STRENGTH = 0.16;
 const flowerVisitGrid = new Map();
 let activeFlowerCell = null;
 let lastFlowerSpawn = null;
+let activePlantPointerId = null;
 
 function decayFlowerVisit(visit, now) {
   const elapsed = now - visit.levelChangedAt;
@@ -2234,13 +2235,56 @@ function spawnFlowerAtPointer(event) {
   }
 }
 
-canvas.addEventListener('pointermove', spawnFlowerAtPointer);
+function isDragPlantPointer(event) {
+  return event.pointerType === 'touch' || event.pointerType === 'pen';
+}
+
+function shouldIgnorePlantPointer(event) {
+  return isDragPlantPointer(event)
+    && activePlantPointerId !== null
+    && event.pointerId !== activePlantPointerId;
+}
+
+function handlePlantPointerDown(event) {
+  if (!event.isPrimary || shouldIgnorePlantPointer(event)) return;
+
+  if (isDragPlantPointer(event)) {
+    activePlantPointerId = event.pointerId;
+    canvas.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  spawnFlowerAtPointer(event);
+}
+
+function handlePlantPointerMove(event) {
+  if (shouldIgnorePlantPointer(event)) return;
+
+  if (isDragPlantPointer(event)) event.preventDefault();
+  spawnFlowerAtPointer(event);
+}
+
+function releasePlantPointer(event) {
+  if (!isDragPlantPointer(event) || event.pointerId !== activePlantPointerId) return;
+
+  if (canvas.hasPointerCapture?.(event.pointerId)) {
+    canvas.releasePointerCapture(event.pointerId);
+  }
+  activePlantPointerId = null;
+  leaveFlowerArea();
+}
+
+canvas.addEventListener('pointerdown', handlePlantPointerDown);
+canvas.addEventListener('pointermove', handlePlantPointerMove);
 canvas.addEventListener('pointerenter', spawnFlowerAtPointer);
-canvas.addEventListener('pointerleave', () => {
+canvas.addEventListener('pointerleave', (event) => {
+  if (isDragPlantPointer(event) && event.pointerId === activePlantPointerId) return;
   if (!sceneNavHoverPinned) setSceneNavHover(null);
   leaveFlowerArea();
 });
-canvas.addEventListener('pointercancel', () => {
+canvas.addEventListener('pointerup', releasePlantPointer);
+canvas.addEventListener('pointercancel', (event) => {
+  releasePlantPointer(event);
   sceneNavHoverPinned = false;
   setSceneNavHover(null);
   leaveFlowerArea();

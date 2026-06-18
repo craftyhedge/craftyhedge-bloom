@@ -21,6 +21,7 @@
      frame are ready, then fades in once data-ready is set on the canvas. */
   .scene-canvas {
     opacity: 0;
+    touch-action: none;
   }
 
   .scene-canvas[data-ready] {
