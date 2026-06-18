@@ -449,6 +449,10 @@ scene.background = new THREE.Color(0x173f18);
 const DESIGN_ASPECT = 16 / 9;
 const DESIGN_VERTICAL_FOV = 42;
 const GROUND_Y = 0;
+const MOBILE_CAMERA_ZOOM_BREAKPOINT = 640;
+const MOBILE_CAMERA_FULL_ZOOM_WIDTH = 430;
+const MOBILE_CAMERA_SCALE = 0.7;
+const MOBILE_TEXT_WIDTH_SCALE = 0.94;
 
 // Responsive text size (computed once at load, NOT live-reactive). The camera
 // fits itself to the text frame, so a fixed-size title forces the camera to pull
@@ -484,6 +488,9 @@ const cameraOffset = cameraHome.clone().sub(cameraTarget);
 const camera = new THREE.PerspectiveCamera(DESIGN_VERTICAL_FOV, INITIAL_STAGE_ASPECT, 0.08, 120);
 const textFrameCorners = [];
 const overlayFocusPoint = new THREE.Vector3();
+const TEXT_WIDTH_SCALE = sceneStage.clientWidth < MOBILE_CAMERA_ZOOM_BREAKPOINT
+  ? MOBILE_TEXT_WIDTH_SCALE
+  : 1;
 
 for (const x of [-TEXT_FRAME_HALF_WIDTH, TEXT_FRAME_HALF_WIDTH]) {
   for (const y of [GROUND_Y, GROUND_Y + TEXT_FRAME_HEIGHT]) {
@@ -499,7 +506,17 @@ function setCameraScale(scale) {
   camera.updateMatrixWorld();
 }
 
-function fitCameraToText(aspect) {
+function mobileCameraScaleForWidth(width) {
+  if (width >= MOBILE_CAMERA_ZOOM_BREAKPOINT) return 1;
+  const t = THREE.MathUtils.clamp(
+    (width - MOBILE_CAMERA_FULL_ZOOM_WIDTH) / (MOBILE_CAMERA_ZOOM_BREAKPOINT - MOBILE_CAMERA_FULL_ZOOM_WIDTH),
+    0,
+    1,
+  );
+  return THREE.MathUtils.lerp(MOBILE_CAMERA_SCALE, 1, t);
+}
+
+function fitCameraToText(aspect, finalScaleMultiplier = 1) {
   camera.aspect = aspect;
   camera.fov = DESIGN_VERTICAL_FOV;
   camera.updateProjectionMatrix();
@@ -527,7 +544,7 @@ function fitCameraToText(aspect) {
     else farScale = scale;
   }
 
-  setCameraScale(farScale);
+  setCameraScale(farScale * finalScaleMultiplier);
 
   const projectedText = textFrameCorners.map((point) => point.clone().project(camera));
   const textScreenCenterY = (
@@ -1091,7 +1108,17 @@ function pointInPolygon(x, y, polygon) {
 }
 
 function createGlyphMask(font, word, centerX, centerZ, wordZ) {
-  const contours = font.generateShapes(word, TEXT_SIZE).map((shape) => shape.extractPoints(8));
+  const scalePolygonX = (polygon) => polygon.map((point) => ({
+    x: centerX + (point.x - centerX) * TEXT_WIDTH_SCALE,
+    y: point.y,
+  }));
+  const contours = font.generateShapes(word, TEXT_SIZE).map((shape) => {
+    const { shape: outline, holes } = shape.extractPoints(8);
+    return {
+      shape: scalePolygonX(outline),
+      holes: holes.map(scalePolygonX),
+    };
+  });
 
   function toFontPoint(worldX, worldZ) {
     return {
@@ -1747,6 +1774,7 @@ async function buildFontScene(font) {
       const centerX = (geometry.boundingBox.min.x + geometry.boundingBox.max.x) / 2;
       const centerZ = (geometry.boundingBox.min.z + geometry.boundingBox.max.z) / 2;
       geometry.center();
+      geometry.scale(TEXT_WIDTH_SCALE, 1, 1);
       geometry.computeBoundingBox();
       geometry.translate(0, -geometry.boundingBox.min.y, 0);
       geometry = toCreasedNormals(geometry, THREE.MathUtils.degToRad(100));
@@ -1940,8 +1968,9 @@ fontLoader.load(
 function resize() {
   const width = sceneStage.clientWidth;
   const height = sceneStage.clientHeight;
+  const mobileCameraScale = mobileCameraScaleForWidth(width);
 
-  fitCameraToText(width / height);
+  fitCameraToText(width / height, mobileCameraScale);
   updateSceneNavPlacement();
   if (overlayFocusDistance && requestedOverlayDofAmount > 0) {
     overlayFocusDistance.value = getOverlayFocusDistance();
