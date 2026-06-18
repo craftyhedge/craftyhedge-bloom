@@ -1,14 +1,18 @@
-# Crafty Hedge Bloom
+# Crafty Hedge
 
 ![CRAFTY HEDGE rendered as stone lettering on moss, ringed with colourful blooms](docs/preview.webp)
 
-**▶ [Live demo](https://craftyhedge.github.io/craftyhedge-bloom/)**
+**[Crafty Hedge](https://craftyhedge.github.io/craftyhedge-bloom/)**
 
 Performance may vary.
 
 ⚠️ WebGPU is required
 
-A bit of fun. This started as an excuse to play with **WebGPU** and Three.js.
+A little bio site for Crafty Hedge's Craft CMS plugin work and
+Craft web development, wrapped in a very unnecessary interactive hedge.
+
+It is also a bit of fun. The site started as an excuse to play with **WebGPU**
+and Three.js, then became the landing page instead of just a throwaway demo.
 
 Sweep your pointer across the hedge and blooms break ground in your wake. Come back to a
 patch you've already grown and it cultivates over repeated visits — denser, taller, more
